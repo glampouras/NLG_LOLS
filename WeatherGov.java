@@ -1,4 +1,4 @@
-
+package WeatherGov ;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -9,6 +9,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.regex.Pattern;
 
+import structuredPredictionNLG.Action;
+
+
+
 
 
 public class WeatherGov   {
@@ -17,6 +21,7 @@ public class WeatherGov   {
 	HashSet<String> attributes = new HashSet<>();
 	HashMap<String,HashSet<String>> attributeFields = new HashMap<>();
 	HashMap<String,HashSet<String>> fieldValues = new HashMap<>();
+	int maxWordSequenceLength = 0;
 	public static void main(String[] args){
 		// TODO Auto-generated method stub
 		WeatherGov w = new WeatherGov();
@@ -218,17 +223,18 @@ public class WeatherGov   {
 		 * */
 		
 		for(String docName : docToEvents.keySet()){
+			
 			String attributeId;
 			ArrayList<String> ref = new ArrayList<>() ;
-			String Mrstr = "";
+			String MRstr = " ";
 			ArrayList<String> align = new ArrayList<>();
-			HashMap<String, HashMap<String,HashSet<String>>> attrFieldValue  = new HashMap<>();//for each instance 
+			HashMap<String, HashMap<String,String>> attrFieldValue  = new HashMap<>();//for each instance 
 			
 			String textName = docName.substring(0, docName.indexOf("."))+".text";
 			if(docToText.containsKey(textName)){
 				for(String textLine : docToText.get(textName)){
 					if(textLine!=null){
-						ref.add(textLine);
+						ref.add(textLine+" ");
 					}
 				}
 			}else{
@@ -255,6 +261,7 @@ public class WeatherGov   {
 			/*
 			 * generate Meaning Representation 
 			 * */
+			
 			for(String eventLine : docToEvents.get(docName)){
 				String[] fields ;
 				fields = eventLine.split("\\s+");
@@ -278,22 +285,22 @@ public class WeatherGov   {
 						}
 						else{
 							try{
-								String value = "";
-								String field = "";
-								Mrstr = Mrstr + fields[i]+"  " ;
+								String value = " ";
+								String field = " ";
+								MRstr = MRstr + fields[i]+"  " ;
 								field = fields[i].substring(1, fields[i].length()).split(":")[0];
 								//System.out.println(field);
 								/*
 								 * some event file lost mode value , give them an "EMPTY" value
 								 * */
 								if(fields[i].substring(1, fields[i].length()).split(":").length==1){
-									value = "EMPTY";
+									value = "empty";
 								}else{
 							
 									value = fields[i].substring(1, fields[i].length()).split(":")[1];
-									//System.out.println(field);
+									
 								}
-								//System.out.println(value);
+								
 								/*
 								 * change the max , mean , min , numbers to categories
 								 * */
@@ -301,28 +308,31 @@ public class WeatherGov   {
 									//System.out.println(field + ":"+ value);
 								}
 								if(field!=null&&value!=null){
+									//populate attributeFieldValuePairs
 									if(!attributeFieldValuePairs.containsKey(attributeId)){
 										attributeFieldValuePairs.put(attributeId, new HashMap<>());
-									}else if(!attributeFieldValuePairs.get(attributeId).containsKey(field)){
+									} 
+									if(!attributeFieldValuePairs.get(attributeId).containsKey(field)){
 										attributeFieldValuePairs.get(attributeId).put(field, new HashSet<>());
-									}else{
-										attributeFieldValuePairs.get(attributeId).get(field).add(value);
 									}
+										
+									attributeFieldValuePairs.get(attributeId).get(field).add(value);
 									
+									//populate attrFieldValue
+									//for every MR
 									if(!attrFieldValue.containsKey(attributeId)){
+										
 										attrFieldValue.put(attributeId, new HashMap<>());
-									}else if(!attrFieldValue.get(attributeId).containsKey(field)){
-										attrFieldValue.get(attributeId).put(field, new HashSet<>());
-									}else{
-										attrFieldValue.get(attributeId).get(field).add(value);
 									}
-
-									
+									if(!attrFieldValue.get(attributeId).containsKey(field)){
+										attrFieldValue.get(attributeId).put(field,value);
+									}
 									attributeFields.get(attributeId).add(field);
 									
 									if(!fieldValues.containsKey(field)){
 										fieldValues.put(field, new HashSet<>());
 									}
+									
 									fieldValues.get(field).add(value);
 								}
 								
@@ -334,14 +344,13 @@ public class WeatherGov   {
 								
 							}
 						}
-							
-						
 					}
 				}
 				
 			}
 			
 			HashMap<String,HashSet<String>> textAttrIdAlignment = new  HashMap<>();//for each instance
+			HashSet<String> alignedAttrRecord = new HashSet<>();
 			if(!attrFieldValue.isEmpty()
 					&&!align.isEmpty()
 					&&!ref.isEmpty()){
@@ -355,20 +364,72 @@ public class WeatherGov   {
 					if(id!=null){
 						if(!textAttrIdAlignment.containsKey(id[0])){
 							textAttrIdAlignment.put(id[0], new HashSet<>());
+							
 						}
 						
 						for(int j = 1;j<id.length;j++){
 							textAttrIdAlignment.get(id[0]).add(id[j]);
+							alignedAttrRecord.add(id[j]);//this file contains what attribute 
+							
 						}
 					}else{System.out.println("id is null!");}
 				
 				}
 			}
-			if(textAttrIdAlignment.isEmpty()){
-				System.out.println("textAttrIdAlignment is empty");
-			}
-						
-		}
+			//  for each instance build MR
+			WeatherMeaningRepresentation MR = new WeatherMeaningRepresentation(attrFieldValue,MRstr);
+			
+			//start build DatasetInstance
+			ArrayList<String> observedAttrFieldValueSequence = new ArrayList<>();
+            ArrayList<String> observedWordSequence = new ArrayList<>();
+            String refStr = String.join("", ref);
+            String[] words = refStr.replaceAll("([.,])", " @punc").split("\\s+");
+            for(String w : words){
+            	//if((!w.isEmpty())&&(observedWordSequence.isEmpty()||w.trim().equals(observedWordSequence.get(observedWordSequence.size()-1)if((!w.isEmpty())&&(observedWordSequence.isEmpty()||w.trim().equals(observedWordS))){
+            		observedWordSequence.add(w.trim().toLowerCase());
+            	//}
+            }
+            //System.out.println(observedWordSequence);
+            if(observedWordSequence.size()>maxWordSequenceLength){
+            	maxWordSequenceLength = observedWordSequence.size();
+            }
+            ArrayList<String> wordToAttrFieldValueAlignment = new ArrayList<>();
+            observedWordSequence.forEach((word) -> {
+                if (word.trim().matches("@punc")) {
+                    wordToAttrFieldValueAlignment.add(WeatherAction.TOKEN_PUNCT);
+                } else {
+                    wordToAttrFieldValueAlignment.add("[]");
+                }
+            });
+            if(wordToAttrFieldValueAlignment.size()!=observedWordSequence.size()){
+            	System.out.println("length not equal");
+            }
+            ArrayList<WeatherAction> directReferenceSequence = new ArrayList<>();
+            for (int r = 0; r < observedWordSequence.size(); r++) {
+                directReferenceSequence.add(new WeatherAction(observedWordSequence.get(r),"",wordToAttrFieldValueAlignment.get(r)));
+            }  
+            for(int i = 0; i<directReferenceSequence.size();i++){
+            	WeatherDatasetInstance DI = new WeatherDatasetInstance(MR,directReferenceSequence,"");
+            }
+            
+				
+					
+					
+				
+				
+			
+			
+			
+			
+			
+		}//end for each instance
+		
+	}
+	public String postProcessRef(WeatherMeaningRepresentation mr, ArrayList<WeatherAction> directReferenceSequence){
+		String cleanedWords = "";
+		
+		
+		return "";
 	}
 
 }
