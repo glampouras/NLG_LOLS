@@ -1,13 +1,16 @@
 package WeatherGov ;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.regex.Pattern;
+
+import similarity_measures.Levenshtein;
+
 
 
 
@@ -20,6 +23,8 @@ public class WeatherGov   {
 	HashMap<String,HashSet<String>> attributeFields = new HashMap<>();
 	HashMap<String,HashSet<String>> fieldValues = new HashMap<>();
 	int maxWordSequenceLength = 0;
+	ArrayList<WeatherDatasetInstance> DatasetInstances = new ArrayList<>();
+	
 	public static void main(String[] args){
 		// TODO Auto-generated method stub
 		WeatherGov w = new WeatherGov();
@@ -224,7 +229,7 @@ public class WeatherGov   {
 			
 			String attributeId;
 			ArrayList<String> ref = new ArrayList<>() ;
-			String MRstr = " ";
+			String MRstr = "";
 			ArrayList<String> align = new ArrayList<>();
 			HashMap<String, HashMap<String,String>> attrFieldValue  = new HashMap<>();//for each instance 
 			
@@ -264,7 +269,7 @@ public class WeatherGov   {
 				String[] fields ;
 				fields = eventLine.split("\\s+");
 				
-				if(!fields[fields.length-1].equals("@mode:--")){
+				if(!fields[fields.length-1].equals("@mode:--")){//filter out mode= -- , no use
 					attributeId = fields[0].split(":")[1];
 					attributes.add(attributeId);
 					if(!attributeFields.containsKey(attributeId)){
@@ -272,7 +277,7 @@ public class WeatherGov   {
 					}
 					for(int i = 1;  i<fields.length;i++){
 						/*
-						 * get out the data: label: and Night , no use. 
+						 * remove the data: label: and Night , no use. 
 						 * */					
 						if(fields[i].contains(".date:")){
 						}
@@ -283,8 +288,8 @@ public class WeatherGov   {
 						}
 						else{
 							try{
-								String value = " ";
-								String field = " ";
+								String value = "";
+								String field = "";
 								MRstr = MRstr + fields[i]+"  " ;
 								field = fields[i].substring(1, fields[i].length()).split(":")[0];
 								//System.out.println(field);
@@ -345,9 +350,9 @@ public class WeatherGov   {
 					}
 				}
 				
-			}
+			}//end reading each file
 			
-			HashMap<String,HashSet<String>> textAttrIdAlignment = new  HashMap<>();//for each instance
+			HashMap<String,HashSet<String>> textAttrIdAlignment = new  HashMap<>();
 			HashSet<String> alignedAttrRecord = new HashSet<>();
 			if(!attrFieldValue.isEmpty()
 					&&!align.isEmpty()
@@ -374,6 +379,32 @@ public class WeatherGov   {
 				
 				}
 			}
+			
+			
+			/*
+			 * for each align file, check if retain the unique time attributes is right
+			 * */
+			/*
+			String time = "";
+			for(String id :alignedAttrRecord){
+				
+				if(attrFieldValue.containsKey(id)){
+					if(attrFieldValue.get(id).get("type").equals("temperature")){
+						time = attrFieldValue.get(id).get("time");
+						
+					}
+					if(!attrFieldValue.get(id).get("time").equals(time)){
+						System.out.println(attrFieldValue.get(id));
+						System.out.println(time);
+						System.out.println(docName);
+					}
+				}
+			}
+			*/
+			
+			
+			
+			
 			//  for each instance build MR
 			WeatherMeaningRepresentation MR = new WeatherMeaningRepresentation(attrFieldValue,MRstr);
 			
@@ -404,11 +435,126 @@ public class WeatherGov   {
             }
             ArrayList<WeatherAction> directReferenceSequence = new ArrayList<>();
             for (int r = 0; r < observedWordSequence.size(); r++) {
-                directReferenceSequence.add(new WeatherAction(observedWordSequence.get(r),"",wordToAttrFieldValueAlignment.get(r)));
-            }  
-            for(int i = 0; i<directReferenceSequence.size();i++){
-            	WeatherDatasetInstance DI = new WeatherDatasetInstance(MR,directReferenceSequence,"");
-            }
+                directReferenceSequence.add(new WeatherAction(observedWordSequence.get(r),wordToAttrFieldValueAlignment.get(r),""));
+            } 
+            /*
+             * build DI
+             * */
+            
+            WeatherDatasetInstance DI = new WeatherDatasetInstance(MR,directReferenceSequence,"");
+            /*
+             * populate evaluationReferences combine all reference for DIs that have same MR
+             * */
+            DatasetInstances.stream().filter((existingDI)->(existingDI.getMR().getAbstractMR().equals(DI.getMR().getAbstractMR())))
+            .map((existingDI)->{
+            	
+            	existingDI.getEvaluationReferences().addAll(DI.getEvaluationReferences());
+            	return existingDI;
+            }).forEachOrdered((existingDI)->{
+            	DI.getEvaluationReferences().addAll(existingDI.getEvaluationReferences());
+            });
+            DatasetInstances.add(DI);
+            
+            /*
+             * build  valueAlignment
+             * */
+            HashMap<String,HashMap<String,Double>> observedValueAlignments = new HashMap<>();
+            
+            MR.getAttrFieldValue().keySet().forEach((attr)->{
+            	ArrayList<String> fields ;
+            	fields = new ArrayList<>(MR.getAttrFieldValue().get(attr).keySet());
+            	Collections.sort(fields);
+            	fields.stream().forEach((field)->{
+            		boolean isDigit;
+                    boolean isTime;
+            		isDigit = false;
+            		isTime = false;
+            		String valueToCompare;
+            		valueToCompare = MR.getAttrFieldValue().get(attr).get(field);
+            		if(Pattern.matches("([0-9]+)", valueToCompare)){
+            			//System.out.println(valueToCompare+" is digit");
+            			isDigit = true;
+            		}
+            		if(field.equals("time")&&Pattern.matches("([0-9]+)-([0-9]+)",valueToCompare )){
+            			System.out.println(valueToCompare+" is time");
+            			isTime = true;
+            		}
+            		if(valueToCompare.equals("windDir")){
+            			valueToCompare = "wind Dir";
+            		}
+            		if(valueToCompare.equals("windSpeed")){
+            			valueToCompare = "wind Speed";
+            		}
+            		if(valueToCompare.equals("windChill")){
+            			valueToCompare = "wind Chill";
+            		}
+            		if(valueToCompare.equals("freezingRainChance")){
+            			valueToCompare = "freezing Rain Chance";
+            		}
+            		if(valueToCompare.equals("freezingRainChance")){
+            			valueToCompare = "freezing Rain Chance";
+            		}
+            		if(valueToCompare.equals("precipPotential")){
+            			valueToCompare = "precip Potential";
+            		}
+            		if(valueToCompare.equals("rainChance")){
+            			valueToCompare = "rain Chance";
+            		}
+            		if(valueToCompare.equals("thunderChance")){
+            			valueToCompare = "thunder Chance";
+            		}
+            		if(valueToCompare.equals("sleetChance")){
+            			valueToCompare = "sleet Chance";
+            		}
+            		if(valueToCompare.equals("snowChance")){
+            			valueToCompare = "snow Chance";
+            		}
+            		if(valueToCompare.equals("skyCover")){
+            			valueToCompare = "sky Cover";
+            		}
+            		
+            		observedValueAlignments.put(valueToCompare, new HashMap<>());
+            		for(int n = 1;n<observedWordSequence.size();n++){
+            			for(int r = 0;r<=observedWordSequence.size()-n;r++){
+            				boolean compareAgainstNGram = true;
+            				for(int j = 0;j<n;j++){
+            					
+            					if(observedWordSequence.get(j+r).equals(WeatherAction.TOKEN_PUNCT)
+            								||observedWordSequence.get(r + j).equalsIgnoreCase("and")
+            								||observedWordSequence.get(r + j).equalsIgnoreCase("or")){
+            						compareAgainstNGram = false;
+            					}
+            				}
+            				if(!isDigit&&!isTime&&compareAgainstNGram){
+            					String alignIndex = "";
+            					String compare = "";
+            					String backwardCompare = "";
+            					for(int j = 0;j<n;j++){
+            						alignIndex += (j+r)+" ";
+            						compare += observedWordSequence.get((r+j));
+            						backwardCompare = observedWordSequence.get(r + j) + backwardCompare;
+            						 
+            					}
+            					alignIndex = alignIndex.trim();
+            					Double distance = Levenshtein.getSimilarity(valueToCompare.toLowerCase(), compare.toLowerCase(), true);
+            					Double backwardDistance = Levenshtein.getSimilarity(valueToCompare.toLowerCase(), backwardCompare.toLowerCase(), true);
+            					if (backwardDistance > distance) {
+                                    distance = backwardDistance;
+                                }
+            					if (distance > 0.3) {
+            						observedValueAlignments.get(valueToCompare).put(alignIndex, distance);
+                                    
+                                }
+            				}
+            			}
+            			
+            		}
+            		
+            	});
+            	
+            });
+            //System.out.println(observedValueAlignments);
+            
             
 				
 					
@@ -421,7 +567,7 @@ public class WeatherGov   {
 			
 			
 		}//end for each instance
-		
+	
 	}
 	public String postProcessRef(WeatherMeaningRepresentation mr, ArrayList<WeatherAction> directReferenceSequence){
 		String cleanedWords = "";
@@ -429,5 +575,6 @@ public class WeatherGov   {
 		
 		return "";
 	}
+	
 
 }
