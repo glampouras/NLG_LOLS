@@ -1,12 +1,20 @@
 package WeatherGov ;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import similarity_measures.Levenshtein;
@@ -17,6 +25,7 @@ import similarity_measures.Levenshtein;
 
 
 public class WeatherGov   {
+	
 	HashMap<String,HashMap<String,HashSet<String>>> attributeFieldValuePairs = new HashMap<>();
 	Boolean useAlignmentData = true;
 	HashSet<String> attributes = new HashSet<>();
@@ -24,18 +33,103 @@ public class WeatherGov   {
 	HashMap<String,HashSet<String>> fieldValues = new HashMap<>();
 	int maxWordSequenceLength = 0;
 	ArrayList<WeatherDatasetInstance> DatasetInstances = new ArrayList<>();
+	ArrayList<WeatherDatasetInstance> testingData = new ArrayList<>();
 	
+	HashMap<String,HashMap<String,Double>> valueAlignments = new HashMap<>();
+	ArrayList<ArrayList<String>> attributeFieldValueSequence = new ArrayList<>();
 	public static void main(String[] args){
 		// TODO Auto-generated method stub
 		WeatherGov w = new WeatherGov();
-		ArrayList<String> fileNames = w.readInDataName();
-		w.readInFile(fileNames);
+		w.parseDataset();
+		
+		
+		
 		
 		
 		
 		
 		
 	}
+	@SuppressWarnings("unused")
+	public void parseDataset(){
+		ArrayList<String> fileNames = readInDataName();
+		
+		if (true && !loadLists()) {
+			createLists(fileNames);
+			writeLists();
+        }
+		//System.out.println(DatasetInstances.get(200).state);
+		String meiTestingData = "/Users/chenmingjie/Documents/workspace/JLOLS_NLG-master/weather-data/testing_data.txt";
+		BufferedReader br =null ;
+		try {
+			br = new BufferedReader(new FileReader(meiTestingData));
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		try {
+			//boolean newfile;
+			String state = "";
+			String city = "";
+			String date = "";
+			String id = "";
+			String line = br.readLine();
+			while(line!=null){
+				String s = line;
+				if(s.startsWith("file id")){
+					id = s.split(" ")[2];
+					//newfile = true;
+					state = "";
+					city = "";
+					date = "";
+					
+					
+				}
+				else if(s.startsWith("city")){
+					city = s.split(":")[1];
+				}
+				else if(s.startsWith("eventfile")){
+					date = s.split(":")[1];
+				}
+				else if(s.startsWith("state")){
+					state = s.split(":")[1];
+					//System.out.println("id is "+id+" city is "+city+" state is "+state+"date is "+ date);
+					/*
+					DatasetInstances.stream().forEach((di)->{
+						if(!state.equals("")
+								&&!city.equals("")
+								&&!date.equals("")){
+							
+						}
+					});*/
+					for(WeatherDatasetInstance di : DatasetInstances){
+						//System.out.println(di.state+" "+di.city+ " "+di.date);
+						if(!state.equals("")
+								&&!city.equals("")
+								&&!date.equals("")){
+							if(di.city.equals(city.trim())
+									&&di.state.equals(state.trim())
+									&&di.date.equals(date.trim())){
+								//System.out.println("1");
+								testingData.add(di);
+							}
+						}
+					}
+				}
+				line = br.readLine();
+			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		System.out.println(testingData.size());
+		
+		
+		
+	}
+	/*
+	 * read in the file names 
+	 * */
 	public ArrayList<String> readInDataName(){
 		ArrayList<String> fileNames = new ArrayList<>();
 		final File folder = new File("weather-data/data");
@@ -74,8 +168,10 @@ public class WeatherGov   {
 	
 	
 	
-	
-	public void readInFile(ArrayList<String> fileNames){
+	/*
+	 * read in data and create MeaningRepresentation and DatasetInstances for each instance
+	 * */
+	public void createLists(ArrayList<String> fileNames){
 		HashMap<String,ArrayList<String>>  docToEvents = new HashMap<>();
 		HashMap<String,ArrayList<String>>  docToAlign = new HashMap<>();
 		HashMap<String,ArrayList<String>>  docToText = new HashMap<>();
@@ -220,12 +316,26 @@ public class WeatherGov   {
 			}
 
 		}
-		
-		/*for every instance , generate Meaning Representation and reference (dataInstance)
+		//int numberFile=0;
+		/* start for each instance , generate Meaning Representation and reference (dataInstance)
 		 * 
 		 * */
-		
+		int numberFile=0;
 		for(String docName : docToEvents.keySet()){
+			//if(numberFile%100==0){
+				
+			
+			System.out.println("this is "+numberFile);
+			String state = "";
+			String city = "";
+			String date = "";
+			String[] components = docName.split("/");
+			state = components[2];
+			city = components[3];
+			date = components[4];
+			date = date.substring(0, date.indexOf("."));
+			
+			
 			
 			String attributeId;
 			ArrayList<String> ref = new ArrayList<>() ;
@@ -442,6 +552,9 @@ public class WeatherGov   {
              * */
             
             WeatherDatasetInstance DI = new WeatherDatasetInstance(MR,directReferenceSequence,"");
+            DI.city  = city;
+            DI.date = date;
+            DI.state = state;
             /*
              * populate evaluationReferences combine all reference for DIs that have same MR
              * */
@@ -476,7 +589,7 @@ public class WeatherGov   {
             			isDigit = true;
             		}
             		if(field.equals("time")&&Pattern.matches("([0-9]+)-([0-9]+)",valueToCompare )){
-            			System.out.println(valueToCompare+" is time");
+            			//System.out.println(valueToCompare+" is time");
             			isTime = true;
             		}
             		if(valueToCompare.equals("windDir")){
@@ -545,35 +658,271 @@ public class WeatherGov   {
             						observedValueAlignments.get(valueToCompare).put(alignIndex, distance);
                                     
                                 }
-            				}
+            				}/*else if(isDigit&&!isTime&&(field.equals("max")||field.equals("min")||field.equals("mean"))){
+            					
+            					         				
+            				}*/
             			}
             			
+            		}
+            		if(isDigit&&!isTime&&(field.equals("max")||field.equals("min")||field.equals("mean"))){
+            			Pattern patt = Pattern.compile("([0-9]+)");
+            			for(int k = 0;k<observedWordSequence.size();k++){
+            				Matcher mat = patt.matcher(observedWordSequence.get(k));
+            				if(mat.find()){
+            					Integer figure = Integer.parseInt(mat.group());//figure in the text
+            					Integer valueFigure = Integer.parseInt(valueToCompare);//figure in the MR value
+            					if(Math.abs(figure-valueFigure)<=5){
+            						observedValueAlignments.get(valueToCompare).put(Integer.toString(k),(-1)*(double)Math.abs(figure-valueFigure) );
+            					}
+            				}
+            			}
             		}
             		
             	});
             	
             });
             //System.out.println(observedValueAlignments);
-            
-            
-				
-					
-					
-				
-				
-			
-			
-			
-			
-			
-		}//end for each instance
+            HashSet<String> toRemove = new HashSet<>();
+            for (String value : observedValueAlignments.keySet()) {
+                if (observedValueAlignments.get(value).isEmpty()) {
+                    toRemove.add(value);
+                }
+            }
+            for (String value : toRemove) {
+                observedValueAlignments.remove(value);
+            }
+            //split the numbers and word value
+            while (!observedValueAlignments.keySet().isEmpty()) {
+                // Find the best aligned nGram
+                Double max = Double.NEGATIVE_INFINITY;
+                Double min = Double.POSITIVE_INFINITY;
+                String[] bestAlignment = new String[2];
+                //numbers value 
+                for (String value : observedValueAlignments.keySet()) {
+                	                		
+                		for (String alignment : observedValueAlignments.get(value).keySet()) {
+                			if (observedValueAlignments.get(value).get(alignment) > max) {
+                				max = observedValueAlignments.get(value).get(alignment);
+                				bestAlignment[0] = value;
+                				bestAlignment[1] = alignment;
+                        	}
+                    	}
+                	
+                }
+                // Find the subphrase that corresponds to the best aligned nGram, according to the coordinates
+                ArrayList<String> alignedStr = new ArrayList<>();
+                String[] coords = bestAlignment[1].split(" ");
+                if (coords.length == 1) {
+                    alignedStr.add(observedWordSequence.get(Integer.parseInt(coords[0].trim())));
+                } else {
+                    for (int a = Integer.parseInt(coords[0].trim()); a <= Integer.parseInt(coords[coords.length - 1].trim()); a++) {
+                        alignedStr.add(observedWordSequence.get(a));
+                    }
+                }
+                // Store the best aligned nGram
+                if(!valueAlignments.containsKey(bestAlignment[0])){
+                	valueAlignments.put(bestAlignment[0], new HashMap<>());
+                	
+                }
+                valueAlignments.get(bestAlignment[0]).put(bestAlignment[1], max);
+             // And remove it from the observed ones for this instance
+                observedValueAlignments.remove(bestAlignment[0]);
+             // And also remove any other aligned nGrams that are overlapping with the best aligned nGram
+                observedValueAlignments.keySet().forEach((value) -> {
+                    HashSet<String> alignmentsToBeRemoved = new HashSet<>();
+                    observedValueAlignments.get(value).keySet().forEach((alignment) -> {
+                        String[] othCoords = alignment.split(" ");
+                        if (Integer.parseInt(coords[0].trim()) <= Integer.parseInt(othCoords[0].trim()) && (Integer.parseInt(coords[coords.length - 1].
+                        		trim()) >= Integer.parseInt(othCoords[0].trim()))
+                                || (Integer.parseInt(othCoords[0].trim()) <= Integer.parseInt(coords[0].trim()) && Integer.parseInt(othCoords[othCoords.length - 1].
+                                		trim()) >= Integer.parseInt(coords[0].trim()))) {
+                            alignmentsToBeRemoved.add(alignment);
+                        }
+                    });
+                    alignmentsToBeRemoved.forEach((alignment) -> {
+                        observedValueAlignments.get(value).remove(alignment);
+                    });
+                });
+             // We filter out any values that are no longer aligned (due to overlapping conflicts)
+                toRemove = new HashSet<>();
+                for (String value : observedValueAlignments.keySet()) {
+                    if (observedValueAlignments.get(value).isEmpty()) {
+                        toRemove.add(value);
+                    }
+                }
+                for (String value : toRemove) {
+                    observedValueAlignments.remove(value);
+                }
+                
+            }
+            attributeFieldValueSequence.add(observedAttrFieldValueSequence);
+		//} //end if debug  
+         numberFile++;
+		}
+		//end for each instance
 	
 	}
 	public String postProcessRef(WeatherMeaningRepresentation mr, ArrayList<WeatherAction> directReferenceSequence){
 		String cleanedWords = "";
+		for(WeatherAction nlWord : directReferenceSequence){
+			if(!nlWord.equals(new WeatherAction("","",WeatherAction.TOKEN_START))
+					&&nlWord.equals(new WeatherAction("","",WeatherAction.TOKEN_END))){
+				cleanedWords += " " + nlWord.getWord();
+				
+			}
+			
+			
+			
+		}
+		cleanedWords = cleanedWords.trim()+ ".";
 		
 		
-		return "";
+		return cleanedWords;
+	}
+	public void writeLists(){
+		
+		String file1 = "cache/attributeFieldValuePairs" ;
+        String file2 = "cache/attributes" ;
+        String file3 = "cache/valueAlignments";
+        String file4 = "cache/DatasetInstances";
+        String file5 = "cache/maxWordSequenceLength";
+        FileOutputStream fout1 = null;
+        ObjectOutputStream oos1 = null;
+        FileOutputStream fout2 = null;
+        ObjectOutputStream oos2 = null;
+        FileOutputStream fout3 = null;
+        ObjectOutputStream oos3 = null;
+        FileOutputStream fout4 = null;
+        ObjectOutputStream oos4 = null;
+        FileOutputStream fout5 = null;
+        ObjectOutputStream oos5 = null;
+        try {
+            System.out.print("Write lists...");
+            fout1 = new FileOutputStream(file1);
+            oos1 = new ObjectOutputStream(fout1);
+            oos1.writeObject(attributeFieldValuePairs);
+            ///////////////////
+            fout2 = new FileOutputStream(file2);
+            oos2 = new ObjectOutputStream(fout2);
+            oos2.writeObject(attributes);
+            ///////////////////
+            fout3 = new FileOutputStream(file3);
+            oos3 = new ObjectOutputStream(fout3);
+            oos3.writeObject(valueAlignments);
+            ///////////////////
+            fout4 = new FileOutputStream(file4);
+            oos4 = new ObjectOutputStream(fout4);
+            oos4.writeObject(DatasetInstances);
+            ///////////////////
+            fout5 = new FileOutputStream(file5);
+            oos5 = new ObjectOutputStream(fout5);
+            oos5.writeObject(maxWordSequenceLength);
+            ///////////////////
+            
+          
+        } catch (IOException ex) {
+        } finally {
+            try {
+                fout1.close();
+                fout2.close();
+                fout3.close();
+                fout4.close();
+                fout5.close();
+                
+            } catch (IOException ex) {
+            }
+            try {
+                oos1.close();
+                oos2.close();
+                oos3.close();
+                oos4.close();
+                oos5.close();
+            } catch (IOException ex) {
+            }
+        }
+	}
+	@SuppressWarnings("unchecked")
+	public boolean loadLists(){
+		String file1 = "cache/attributeFieldValuePairs" ;
+        String file2 = "cache/attributes" ;
+        String file3 = "cache/valueAlignments";
+        String file4 = "cache/DatasetInstances";
+        String file5 = "cache/maxWordSequenceLength";
+        FileInputStream fin1 = null;
+        ObjectInputStream ois1 = null;
+        FileInputStream fin2 = null;
+        ObjectInputStream ois2 = null;
+        FileInputStream fin3 = null;
+        ObjectInputStream ois3 = null;
+        FileInputStream fin4 = null;
+        ObjectInputStream ois4 = null;
+        FileInputStream fin5 = null;
+        ObjectInputStream ois5 = null;
+        if ((new File(file1)).exists()
+                && (new File(file2)).exists()
+                && (new File(file3)).exists()
+                && (new File(file4)).exists()
+                && (new File(file5)).exists()) {
+        	try{
+        		System.out.print("Load lists...");
+        		fin1 = new FileInputStream(file1);
+                ois1 = new ObjectInputStream(fin1);
+                Object o1 = ois1.readObject();
+                if (attributeFieldValuePairs.isEmpty()) {
+                    if (o1 instanceof HashMap) {
+                    	attributeFieldValuePairs = new HashMap<String,HashMap<String,HashSet<String>>>((Map<? extends String,? extends HashMap<String,HashSet<String>>>) o1);
+                    }
+                } else if (o1 instanceof ArrayList) {
+                	attributeFieldValuePairs.putAll((Map<? extends String,? extends HashMap<String,HashSet<String>>>) o1);
+                }
+                fin2 = new FileInputStream(file2);
+                ois2 = new ObjectInputStream(fin2);
+                Object o2 = ois2.readObject();
+                if(attributes.isEmpty()){
+                	if(o2 instanceof HashSet){
+                		attributes = new HashSet<String>((Collection<? extends String>)o2);
+                	}
+                }else{
+                	attributes.addAll((Collection<? extends String>)o2);
+                }
+                fin3 = new FileInputStream(file3);
+                ois3 = new ObjectInputStream(fin3);
+                Object o3 = ois3.readObject();
+                if(valueAlignments.isEmpty()){
+                	if(valueAlignments instanceof HashMap){
+                		valueAlignments = new HashMap<String, HashMap<String,Double>>((Map<? extends String,? extends HashMap<String, Double>>)o3);
+                	}
+                }else{
+                	valueAlignments.putAll((Map<? extends String,? extends HashMap<String, Double>>)o3);
+                }
+                fin4 = new FileInputStream(file4);
+                ois4 = new ObjectInputStream(fin4);
+                Object o4 = ois4.readObject();
+                if(DatasetInstances instanceof ArrayList){
+                	if(DatasetInstances.isEmpty()){
+                		DatasetInstances = new ArrayList<WeatherDatasetInstance>((Collection<? extends WeatherDatasetInstance>)o4);
+                	}
+                }else{
+                	DatasetInstances.addAll((Collection<? extends WeatherDatasetInstance>)o4);
+                }
+                fin5 = new FileInputStream(file5);
+                ois5 = new ObjectInputStream(fin5);
+                Object o5 = ois5.readObject();
+                maxWordSequenceLength = (int)o5;
+                System.out.println("done!");
+                
+        	}catch (ClassNotFoundException | IOException ex) {
+        		
+            }
+        	return true;
+        }else{
+        	return false;
+        }
+	}
+	public void createNaiveAlignment(ArrayList<WeatherDatasetInstance> trainingData){
+		
+		
 	}
 	
 
