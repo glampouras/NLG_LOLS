@@ -24,6 +24,7 @@ import similarity_measures.Levenshtein;
 
 
 
+
 public class WeatherGov   {
 	
 	HashMap<String,HashMap<String,HashSet<String>>> attributeFieldValuePairs = new HashMap<>();
@@ -34,13 +35,18 @@ public class WeatherGov   {
 	int maxWordSequenceLength = 0;
 	ArrayList<WeatherDatasetInstance> DatasetInstances = new ArrayList<>();
 	ArrayList<WeatherDatasetInstance> testingData = new ArrayList<>();
+	ArrayList<WeatherDatasetInstance> trainingData = new ArrayList<>();
+	ArrayList<WeatherDatasetInstance> validationData = new ArrayList<>();
 	
-	HashMap<String,HashMap<String,Double>> valueAlignments = new HashMap<>();
+	HashMap<String,HashMap<ArrayList<String>,Double>> valueAlignments = new HashMap<>();
 	ArrayList<ArrayList<String>> attributeFieldValueSequence = new ArrayList<>();
+	
+	//boolean debug = true;
 	public static void main(String[] args){
-		// TODO Auto-generated method stub
+		
 		WeatherGov w = new WeatherGov();
 		w.parseDataset();
+		w.createTrainingData();
 		
 		
 		
@@ -52,9 +58,10 @@ public class WeatherGov   {
 	}
 	@SuppressWarnings("unused")
 	public void parseDataset(){
+		
 		ArrayList<String> fileNames = readInDataName();
 		
-		if (true && !loadLists()) {
+		if ((true&&!loadLists())) {
 			createLists(fileNames);
 			writeLists();
         }
@@ -64,7 +71,7 @@ public class WeatherGov   {
 		try {
 			br = new BufferedReader(new FileReader(meiTestingData));
 		} catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
+			//
 			e.printStackTrace();
 		}
 		try {
@@ -119,13 +126,28 @@ public class WeatherGov   {
 				line = br.readLine();
 			}
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			// 
 			e.printStackTrace();
 		}
-		System.out.println(testingData.size());
+		//System.out.println(testingData.size());
+		ArrayList<WeatherDatasetInstance> restData = new ArrayList<>();
+		DatasetInstances.stream().forEach(di->{
+			if(!testingData.contains(di)){
+				restData.add(di);
+			}
+		});
+		for (int i = 0; i < restData.size(); i++) {
+            if (i < 1000) {
+                validationData.add(restData.get(i));
+            } else {
+                trainingData.add(restData.get(i));
+            }
+        }
 		
-		
-		
+		//System.out.println(validationData.size()+" "+trainingData.size());
+		System.out.println("Training data size: " + trainingData.size());
+        System.out.println("Validation data size: " + validationData.size());
+        System.out.println("Test data size: " + testingData.size());
 	}
 	/*
 	 * read in the file names 
@@ -182,7 +204,7 @@ public class WeatherGov   {
 					
 					br = new BufferedReader(new FileReader(name));
 				} catch (Exception e1) {
-					// TODO Auto-generated catch block
+					// 
 					e1.printStackTrace();
 				
 				}
@@ -204,14 +226,14 @@ public class WeatherGov   {
 					
 
 				} catch (Exception e) {
-					// TODO Auto-generated catch block
+					// 
 					e.printStackTrace();
 					System.out.println("can not find file");
 				}finally{
 					try {
 						br.close();
 					} catch (IOException e) {
-						// TODO Auto-generated catch block
+						// 
 						e.printStackTrace();
 					}
 				}
@@ -220,7 +242,7 @@ public class WeatherGov   {
 					br = new BufferedReader(new FileReader(name));
 					//er = new EasyReader(name);
 				} catch (Exception e1) {
-					// TODO Auto-generated catch block
+					// 
 					e1.printStackTrace();
 				
 				}
@@ -242,14 +264,14 @@ public class WeatherGov   {
 					
 
 				} catch (Exception e) {
-					// TODO Auto-generated catch block
+					// 
 					e.printStackTrace();
 					System.out.println("can not find file");
 				}finally{
 					try {
 						br.close();
 					} catch (IOException e) {
-						// TODO Auto-generated catch block
+						
 						e.printStackTrace();
 					}
 				}
@@ -258,7 +280,7 @@ public class WeatherGov   {
 					br = new BufferedReader(new FileReader(name));
 					//er = new EasyReader(name);
 				} catch (Exception e1) {
-					// TODO Auto-generated catch block
+					
 					e1.printStackTrace();
 				
 				}
@@ -280,14 +302,14 @@ public class WeatherGov   {
 					
 
 				} catch (Exception e) {
-					// TODO Auto-generated catch block
+					
 					e.printStackTrace();
 					System.out.println("can not find file");
 				}finally{
 					try {
 						br.close();
 					} catch (IOException e) {
-						// TODO Auto-generated catch block
+						
 						e.printStackTrace();
 					}
 				}
@@ -323,7 +345,7 @@ public class WeatherGov   {
 		int numberFile=0;
 		for(String docName : docToEvents.keySet()){
 			//if(numberFile%100==0){
-				
+			
 			
 			System.out.println("this is "+numberFile);
 			String state = "";
@@ -522,7 +544,7 @@ public class WeatherGov   {
 			ArrayList<String> observedAttrFieldValueSequence = new ArrayList<>();
             ArrayList<String> observedWordSequence = new ArrayList<>();
             String refStr = String.join("", ref);
-            String[] words = refStr.replaceAll("([.,])", " @punc").split("\\s+");
+            String[] words = refStr.replaceAll("([.,])", WeatherAction.TOKEN_PUNCT).split("\\s+");
             for(String w : words){
             	//if((!w.isEmpty())&&(observedWordSequence.isEmpty()||w.trim().equals(observedWordSequence.get(observedWordSequence.size()-1)if((!w.isEmpty())&&(observedWordSequence.isEmpty()||w.trim().equals(observedWordS))){
             		observedWordSequence.add(w.trim().toLowerCase());
@@ -534,7 +556,7 @@ public class WeatherGov   {
             }
             ArrayList<String> wordToAttrFieldValueAlignment = new ArrayList<>();
             observedWordSequence.forEach((word) -> {
-                if (word.trim().matches("@punc")) {
+                if (word.trim().matches(WeatherAction.TOKEN_PUNCT) ){
                     wordToAttrFieldValueAlignment.add(WeatherAction.TOKEN_PUNCT);
                 } else {
                     wordToAttrFieldValueAlignment.add("[]");
@@ -583,7 +605,11 @@ public class WeatherGov   {
             		isDigit = false;
             		isTime = false;
             		String valueToCompare;
-            		valueToCompare = MR.getAttrFieldValue().get(attr).get(field);
+            		if(!Pattern.matches("([0-9]+)", MR.getAttrFieldValue().get(attr).get(field))&&!
+            				(field.equals("time")||field.equals("max")||field.equals("mean")||field.equals("min")
+            						||Pattern.matches("([0-9]+)-([0-9]+)",MR.getAttrFieldValue().get(attr).get(field) ))){
+            			
+            		/*
             		if(Pattern.matches("([0-9]+)", valueToCompare)){
             			//System.out.println(valueToCompare+" is digit");
             			isDigit = true;
@@ -591,7 +617,8 @@ public class WeatherGov   {
             		if(field.equals("time")&&Pattern.matches("([0-9]+)-([0-9]+)",valueToCompare )){
             			//System.out.println(valueToCompare+" is time");
             			isTime = true;
-            		}
+            		}*/
+            		valueToCompare = MR.getAttrFieldValue().get(attr).get(field);
             		if(valueToCompare.equals("windDir")){
             			valueToCompare = "wind Dir";
             		}
@@ -634,7 +661,8 @@ public class WeatherGov   {
             					
             					if(observedWordSequence.get(j+r).equals(WeatherAction.TOKEN_PUNCT)
             								||observedWordSequence.get(r + j).equalsIgnoreCase("and")
-            								||observedWordSequence.get(r + j).equalsIgnoreCase("or")){
+            								||observedWordSequence.get(r + j).equalsIgnoreCase("or")
+            								||observedWordSequence.get(r+j).matches("([0-9]+)")){
             						compareAgainstNGram = false;
             					}
             				}
@@ -654,17 +682,17 @@ public class WeatherGov   {
             					if (backwardDistance > distance) {
                                     distance = backwardDistance;
                                 }
-            					if (distance > 0.3) {
+            					//if (distance > 0.3) {
             						observedValueAlignments.get(valueToCompare).put(alignIndex, distance);
                                     
-                                }
+                                //}
             				}/*else if(isDigit&&!isTime&&(field.equals("max")||field.equals("min")||field.equals("mean"))){
             					
             					         				
             				}*/
             			}
             			
-            		}
+            		}/*
             		if(isDigit&&!isTime&&(field.equals("max")||field.equals("min")||field.equals("mean"))){
             			Pattern patt = Pattern.compile("([0-9]+)");
             			for(int k = 0;k<observedWordSequence.size();k++){
@@ -677,10 +705,10 @@ public class WeatherGov   {
             					}
             				}
             			}
-            		}
-            		
+            		}*/
+            		}	
             	});
-            	
+            		
             });
             //System.out.println(observedValueAlignments);
             HashSet<String> toRemove = new HashSet<>();
@@ -696,7 +724,6 @@ public class WeatherGov   {
             while (!observedValueAlignments.keySet().isEmpty()) {
                 // Find the best aligned nGram
                 Double max = Double.NEGATIVE_INFINITY;
-                Double min = Double.POSITIVE_INFINITY;
                 String[] bestAlignment = new String[2];
                 //numbers value 
                 for (String value : observedValueAlignments.keySet()) {
@@ -725,7 +752,7 @@ public class WeatherGov   {
                 	valueAlignments.put(bestAlignment[0], new HashMap<>());
                 	
                 }
-                valueAlignments.get(bestAlignment[0]).put(bestAlignment[1], max);
+                valueAlignments.get(bestAlignment[0]).put(alignedStr, max);
              // And remove it from the observed ones for this instance
                 observedValueAlignments.remove(bestAlignment[0]);
              // And also remove any other aligned nGrams that are overlapping with the best aligned nGram
@@ -891,10 +918,10 @@ public class WeatherGov   {
                 Object o3 = ois3.readObject();
                 if(valueAlignments.isEmpty()){
                 	if(valueAlignments instanceof HashMap){
-                		valueAlignments = new HashMap<String, HashMap<String,Double>>((Map<? extends String,? extends HashMap<String, Double>>)o3);
+                		valueAlignments = new HashMap<String, HashMap<ArrayList<String>,Double>>((Map<? extends String,? extends HashMap<ArrayList<String>, Double>>)o3);
                 	}
                 }else{
-                	valueAlignments.putAll((Map<? extends String,? extends HashMap<String, Double>>)o3);
+                	valueAlignments.putAll((Map<? extends String,? extends HashMap<ArrayList<String>, Double>>)o3);
                 }
                 fin4 = new FileInputStream(file4);
                 ois4 = new ObjectInputStream(fin4);
@@ -920,9 +947,155 @@ public class WeatherGov   {
         	return false;
         }
 	}
-	public void createNaiveAlignment(ArrayList<WeatherDatasetInstance> trainingData){
+	public void createTrainingData(){
+		createNaiveAlignments(trainingData);
 		
 		
+		
+	}
+	int u = 0;
+	public void createNaiveAlignments(ArrayList<WeatherDatasetInstance> trainingData){
+		
+		
+		trainingData.stream().map(di->{
+			
+			HashMap<ArrayList<WeatherAction>, ArrayList<WeatherAction>> calculatedRealizationsCache = new HashMap<>();//key directReferenceSequence
+            HashSet<ArrayList<WeatherAction>> initRealizations = new HashSet<>();
+            if (!calculatedRealizationsCache.containsKey(di.getDirectReferenceSequence())) {
+                initRealizations.add(di.getDirectReferenceSequence());
+            }
+            initRealizations.stream().map((realization) -> {
+            	HashMap<String, HashMap<String,String>> values = new HashMap<>();
+            	values.putAll(di.getMR().getAttrFieldValue());
+            	ArrayList<WeatherAction> randomRealization = new ArrayList<>();
+            	for(int i=0;i<realization.size();i++){
+            		WeatherAction a = realization.get(i);
+            		
+            		if(a.getField().equals(WeatherAction.TOKEN_PUNCT)){
+            			//System.out.println(a.getField());
+            			randomRealization.add(new WeatherAction(a.getWord(),a.getField(),a.getField()));
+            		}else{
+            			randomRealization.add(new WeatherAction(a.getWord(),"",""));
+            		}
+            	}
+            	//indexAlignments
+            	
+            	HashMap<Double, HashMap<String, ArrayList<Integer>>> indexAlignments = new HashMap<>();
+            	values.keySet().forEach(attr->{
+            		values.get(attr).keySet().forEach(field->{
+            			String value = values.get(attr).get(field);
+            			if(!Pattern.matches("([0-9]+)", value)&&!
+                				(field.equals("time")||field.equals("max")||field.equals("mean")||field.equals("min")
+                						||Pattern.matches("([0-9]+)-([0-9]+)",value ))&&valueAlignments.containsKey(value)){
+            				String valueToCheck = value;
+            				if(valueToCheck.equals("windDir")){
+            					valueToCheck = "wind Dir";
+                    		}
+                    		if(valueToCheck.equals("windSpeed")){
+                    			valueToCheck = "wind Speed";
+                    		}
+                    		if(valueToCheck.equals("windChill")){
+                    			valueToCheck = "wind Chill";
+                    		}
+                    		if(valueToCheck.equals("freezingRainChance")){
+                    			valueToCheck = "freezing Rain Chance";
+                    		}
+                    		if(valueToCheck.equals("freezingRainChance")){
+                    			valueToCheck = "freezing Rain Chance";
+                    		}
+                    		if(valueToCheck.equals("precipPotential")){
+                    			valueToCheck = "precip Potential";
+                    		}
+                    		if(valueToCheck.equals("rainChance")){
+                    			valueToCheck = "rain Chance";
+                    		}
+                    		if(valueToCheck.equals("thunderChance")){
+                    			valueToCheck = "thunder Chance";
+                    		}
+                    		if(valueToCheck.equals("sleetChance")){
+                    			valueToCheck = "sleet Chance";
+                    		}
+                    		if(valueToCheck.equals("snowChance")){
+                    			valueToCheck = "snow Chance";
+                    		}
+                    		if(valueToCheck.equals("skyCover")){
+                    			valueToCheck = "sky Cover";
+                    		}
+                    		for(ArrayList<String> align : valueAlignments.get(valueToCheck).keySet() ){
+                    			int n = align.size();
+                    			for (int i = 0; i <= randomRealization.size() - n; i++) {
+                                    ArrayList<String> compare = new ArrayList<String>();
+                                    ArrayList<Integer> indexAlignment = new ArrayList<Integer>();
+                                    for (int j = 0; j < n; j++) {
+                                        compare.add(randomRealization.get(i + j).getWord());
+                                        indexAlignment.add(i + j);
+                                    }
+                                    if (compare.equals(align)) {
+                                        if (!indexAlignments.containsKey(valueAlignments.get(valueToCheck).get(align))) {
+                                            indexAlignments.put(valueAlignments.get(valueToCheck).get(align), new HashMap<>());
+                                        }
+                                        indexAlignments.get(valueAlignments.get(valueToCheck).get(align)).put(attr +"="+field+"=" + valueToCheck, indexAlignment);
+                                    }
+                                }
+                    			
+                    		}
+            				
+            			}
+            		});
+            	});
+            	ArrayList<Double> similarities = new ArrayList<>(indexAlignments.keySet());
+            	Collections.sort(similarities);
+            	HashSet<String> assignedAttrFieldValues = new HashSet<String>();
+                HashSet<Integer> assignedIntegers = new HashSet<Integer>();
+                for(int i = similarities.size()-1;i>=0;i--){
+                	for(String attrFieldValue : indexAlignments.get(similarities.get(i)).keySet()){
+                		if(!assignedAttrFieldValues.contains(attrFieldValue)){
+                			boolean isUnassigned = true;
+                			for (Integer index : indexAlignments.get(similarities.get(i)).get(attrFieldValue)) {
+                                if (assignedIntegers.contains(index)) {
+                                    isUnassigned = false;
+                                }
+                            }
+                			if (isUnassigned) {
+                				assignedAttrFieldValues.add(attrFieldValue);
+                                for (Integer index : indexAlignments.get(similarities.get(i)).get(attrFieldValue)) {
+                                    assignedIntegers.add(index);
+                                    randomRealization.get(index).setAttribute(attrFieldValue.split("=")[0].toLowerCase().trim());
+                                    randomRealization.get(index).setField(attrFieldValue.split("=")[1].toLowerCase().trim());
+                                    
+                                }
+                            }
+                		}
+                	}
+                }
+                boolean isempty = true;
+            for(int i=0;i<randomRealization.size();i++){
+            	if(!randomRealization.get(i).getWord().equals(WeatherAction.TOKEN_PUNCT)){
+            		if(!randomRealization.get(i).getField().isEmpty()){
+            			isempty = false;
+            			
+            		}
+            		if(!randomRealization.get(i).getAttribute().isEmpty()){
+            			isempty = false;
+            		}
+            	}
+            } 
+            if(isempty){
+            	u++;
+            }
+            //after check, no randomReealization is empty.
+            
+            
+            
+            	return realization;
+            }).forEach(realization->{
+            	
+            });
+			return di;
+		}).forEach(di->{
+			
+		});
+		//System.out.println(u);
 	}
 	
 
