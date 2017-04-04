@@ -25,6 +25,8 @@ import similarity_measures.Levenshtein;
 
 
 
+
+
 public class WeatherGov   {
 	
 	HashMap<String,HashMap<String,HashSet<String>>> attributeFieldValuePairs = new HashMap<>();
@@ -33,6 +35,8 @@ public class WeatherGov   {
 	HashMap<String,HashSet<String>> attributeFields = new HashMap<>();
 	HashMap<String,HashSet<String>> fieldValues = new HashMap<>();
 	int maxWordSequenceLength = 0;
+	int maxFieldSequenceLength = 0;
+	int maxAttributeSequenceLength = 0;
 	ArrayList<WeatherDatasetInstance> DatasetInstances = new ArrayList<>();
 	ArrayList<WeatherDatasetInstance> testingData = new ArrayList<>();
 	ArrayList<WeatherDatasetInstance> trainingData = new ArrayList<>();
@@ -953,7 +957,7 @@ public class WeatherGov   {
 		
 		
 	}
-	int u = 0;
+	
 	public void createNaiveAlignments(ArrayList<WeatherDatasetInstance> trainingData){
 		
 		
@@ -1068,25 +1072,264 @@ public class WeatherGov   {
                 		}
                 	}
                 }
-                boolean isempty = true;
+            /*   
             for(int i=0;i<randomRealization.size();i++){
-            	if(!randomRealization.get(i).getWord().equals(WeatherAction.TOKEN_PUNCT)){
-            		if(!randomRealization.get(i).getField().isEmpty()){
-            			isempty = false;
-            			
-            		}
-            		if(!randomRealization.get(i).getAttribute().isEmpty()){
-            			isempty = false;
-            		}
+            	System.out.print(randomRealization.get(i).getWord()+" ");
+            } 
+            System.out.println("\n");
+            for(int i=0;i<randomRealization.size();i++){
+            	if(randomRealization.get(i).getField().isEmpty()){
+            		System.out.print(" ");
+            	}else{
+            	System.out.print(randomRealization.get(i).getField()+" ");
             	}
             } 
-            if(isempty){
-            	u++;
-            }
+            System.out.println("\n");
+            for(int i=0;i<randomRealization.size();i++){
+            	if(randomRealization.get(i).getAttribute().isEmpty()){
+            		System.out.print(" ");
+            	}else{
+            	System.out.print(randomRealization.get(i).getAttribute()+" ");
+            	}
+            } 
+            System.out.println("\n");
+            */
+            
             //after check, no randomReealization is empty.
-            
-            
-            
+            //finish align the valueAlignments 
+            //next to randomly split from the middle of 2 besides attribute
+                
+                String previousAttr = "";
+                String previousField = "";
+                
+                int start = -1;
+                for (int i = 0; i < randomRealization.size(); i++) {
+                    if (!randomRealization.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)
+                            && !randomRealization.get(i).getAttribute().isEmpty()
+                            && !randomRealization.get(i).getAttribute().equals("[]")
+                            && !randomRealization.get(i).getField().isEmpty()
+                            &&!randomRealization.get(i).getField().equals(WeatherAction.TOKEN_PUNCT)
+                            &&!randomRealization.get(i).getField().equals("[]")) {
+                        if (start != -1) {
+                            int middle = (start + i - 1) / 2 + 1;
+                            for (int j = start; j < middle; j++) {
+                                if (randomRealization.get(j).getAttribute().isEmpty()
+                                        || randomRealization.get(j).getAttribute().equals("[]")
+                                        ||randomRealization.get(j).getField().isEmpty()
+                                       ||randomRealization.get(j).getField().equals("[]") ) {
+                                    randomRealization.get(j).setAttribute(previousAttr);
+                                    randomRealization.get(j).setField(previousField);
+                                }
+                            }
+                            for (int j = middle; j < i; j++) {
+                                if (randomRealization.get(j).getAttribute().isEmpty()
+                                        || randomRealization.get(j).getAttribute().equals("[]")
+                                        ||randomRealization.get(j).getField().isEmpty()
+                                        ||randomRealization.get(j).getField().equals("[]") ) {
+                                    randomRealization.get(j).setAttribute(randomRealization.get(i).getAttribute());
+                                    randomRealization.get(j).setField(randomRealization.get(i).getField());
+                                }
+                            }
+                        }
+                        start = i;
+                        previousAttr = randomRealization.get(i).getAttribute();
+                        previousField = randomRealization.get(i).getField();
+                    } else {
+                        previousAttr = "";
+                        previousField = "";
+                    }
+                }
+                for(int i=0;i<randomRealization.size();i++){
+                	
+                	if(randomRealization.get(i).getAttribute().isEmpty()||randomRealization.get(i).getField().isEmpty()
+                			||randomRealization.get(i).getAttribute().equals("[]")||randomRealization.get(i).getField().equals("[]")){
+                		boolean find = false;
+                		int n = i;
+                		int m = i;
+                		while(!find){
+                			n = n+1;
+                			m = m-1;
+                			if(n>=randomRealization.size()){
+                				n=randomRealization.size()-1;
+                			}
+                			if(m<=0){
+                				m = 0;
+                			}
+                			if(!randomRealization.get(n).getAttribute().isEmpty()&&
+                					!randomRealization.get(n).getAttribute().equals("[]")&&
+                					!randomRealization.get(n).getField().equals("[]")&&
+                					!randomRealization.get(n).getField().isEmpty()&&
+                					!randomRealization.get(n).getAttribute().equals(WeatherAction.TOKEN_PUNCT)&&
+                					!randomRealization.get(n).getField().equals(WeatherAction.TOKEN_PUNCT)
+                					){
+                				find = true;
+                				randomRealization.get(i).setAttribute(randomRealization.get(n).getAttribute());
+                				randomRealization.get(i).setField(randomRealization.get(n).getField());
+                			}else if(!randomRealization.get(m).getAttribute().isEmpty()&&
+                					!randomRealization.get(m).getAttribute().equals("[]")&&
+                					!randomRealization.get(m).getField().equals("[]")&&
+                					!randomRealization.get(m).getField().isEmpty()&&
+                					!randomRealization.get(m).getAttribute().equals(WeatherAction.TOKEN_PUNCT)&&
+                					!randomRealization.get(m).getField().equals(WeatherAction.TOKEN_PUNCT)){
+                				find = true;
+                				randomRealization.get(i).setAttribute(randomRealization.get(m).getAttribute());
+                				randomRealization.get(i).setField(randomRealization.get(m).getField());
+                			}
+                		}
+                	}
+                }
+                /*
+                //backwards
+                
+                previousAttr = "";
+                previousField = "";
+                for(int i=randomRealization.size()-1;i>=0;i--){
+                	if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
+                        if (!previousAttr.isEmpty()&&!previousField.isEmpty()) {
+                            randomRealization.get(i).setAttribute(previousAttr);
+                            randomRealization.get(i).setField(previousField);
+                        }
+                	}else if (!randomRealization.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)&&
+                			!randomRealization.get(i).getField().equals(WeatherAction.TOKEN_PUNCT)) {
+                        previousAttr = randomRealization.get(i).getAttribute();
+                        previousField = randomRealization.get(i).getField();
+                    } else {
+                        previousAttr = "";
+                        previousField = "";
+                    }
+                }
+                //forwards
+                previousAttr = "";
+                previousField = "";
+                for(int i=0;i<randomRealization.size();i++){
+                	if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
+                        if (!previousAttr.isEmpty()&&!previousField.isEmpty()) {
+                            randomRealization.get(i).setAttribute(previousAttr);
+                            randomRealization.get(i).setField(previousField);
+                        }
+                	}else if (!randomRealization.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)&&
+                			!randomRealization.get(i).getField().equals(WeatherAction.TOKEN_PUNCT)) {
+                        previousAttr = randomRealization.get(i).getAttribute();
+                        previousField = randomRealization.get(i).getField();
+                    } else {
+                        previousAttr = "";
+                        previousField = "";
+                    }
+                }
+                //backwards
+                
+                previousAttr = "";
+                previousField = "";
+                for(int i=randomRealization.size()-1;i>=0;i--){
+                	if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
+                        if (!previousAttr.isEmpty()&&!previousField.isEmpty()) {
+                            randomRealization.get(i).setAttribute(previousAttr);
+                            randomRealization.get(i).setField(previousField);
+                        }
+                	}else if (!randomRealization.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)&&
+                			!randomRealization.get(i).getField().equals(WeatherAction.TOKEN_PUNCT)) {
+                        previousAttr = randomRealization.get(i).getAttribute();
+                        previousField = randomRealization.get(i).getField();
+                    } else {
+                        previousAttr = "";
+                        previousField = "";
+                    }
+                }
+                //forwards
+                previousAttr = "";
+                previousField = "";
+                for(int i=0;i<randomRealization.size();i++){
+                	if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
+                        if (!previousAttr.isEmpty()&&!previousField.isEmpty()) {
+                            randomRealization.get(i).setAttribute(previousAttr);
+                            randomRealization.get(i).setField(previousField);
+                        }
+                	}else if (!randomRealization.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)&&
+                			!randomRealization.get(i).getField().equals(WeatherAction.TOKEN_PUNCT)) {
+                        previousAttr = randomRealization.get(i).getAttribute();
+                        previousField = randomRealization.get(i).getField();
+                    } else {
+                        previousAttr = "";
+                        previousField = "";
+                    }
+                }*/
+                //check
+                //for(int i=0;i<randomRealization.size();i++){
+                	//System.out.print(randomRealization.get(i).getWord()+" ");
+                //} 
+                //System.out.println("\n");
+                /*
+                for(int i=0;i<randomRealization.size();i++){
+                	if(randomRealization.get(i).getField().isEmpty()||randomRealization.get(i).getField().equals("[]")){
+                		System.out.println("@empty@ ");
+                	}else{
+                	//System.out.print(randomRealization.get(i).getField()+" ");
+                	}
+                } 
+                //System.out.println("\n");
+                for(int i=0;i<randomRealization.size();i++){
+                	if(randomRealization.get(i).getAttribute().isEmpty()||randomRealization.get(i).getAttribute().equals("[]")){
+                		System.out.println("@empty@ ");
+                	}else{
+                	//System.out.print(randomRealization.get(i).getAttribute()+" ");
+                	}
+                } */
+                //System.out.println("\n");
+                
+                //filter out punctuation
+                ArrayList<WeatherAction> cleanRandomRealization = new ArrayList<>();
+                randomRealization.stream().filter((a)->(!a.getWord().equals(WeatherAction.TOKEN_PUNCT))).forEachOrdered(a->{
+                	cleanRandomRealization.add(a);
+                });
+                
+                //add end token
+                ArrayList<WeatherAction> endAttrRealization = new ArrayList<>();
+                ArrayList<WeatherAction> endFieldRealization = new ArrayList<>();
+                previousAttr = "";
+                previousField = "";
+                for(int i=0;i<cleanRandomRealization.size();i++){
+                	WeatherAction a  = cleanRandomRealization.get(i);
+                	
+                	if(!a.getAttribute().isEmpty()
+                			&&!a.getField().isEmpty()
+                			&&!a.getAttribute().equals(previousAttr)){
+                		endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                		endAttrRealization.add(a);
+                        
+                	}
+                	if(!a.getAttribute().isEmpty()
+                			&&!a.getField().isEmpty()
+                			&&!a.getField().equals(previousField)){
+                		endFieldRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                		endFieldRealization.add(a);
+                        
+                	}
+                	
+                	previousAttr = a.getAttribute();
+                    previousField = a.getField();
+                }
+                endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                endFieldRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,WeatherAction.TOKEN_END,WeatherAction.TOKEN_END));
+                endFieldRealization.add(new WeatherAction(WeatherAction.TOKEN_END,WeatherAction.TOKEN_END,WeatherAction.TOKEN_END));
+                ArrayList<String> attrValues = new ArrayList<String>();
+                ArrayList<String> fieldValues = new ArrayList<String>();
+                endAttrRealization.forEach((a) -> {
+                    if (attrValues.isEmpty()) {
+                        attrValues.add(a.getAttribute());
+                    } else if (!attrValues.get(attrValues.size() - 1).equals(a.getAttribute())) {
+                        attrValues.add(a.getAttribute());
+                    }
+                });
+                endFieldRealization.forEach((a) -> {
+                    if (fieldValues.isEmpty()) {
+                    	fieldValues.add(a.getField());
+                    } else if (!fieldValues.get(fieldValues.size() - 1).equals(a.getField())) {
+                    	fieldValues.add(a.getField());
+                    }
+                });
+                
+                
             	return realization;
             }).forEach(realization->{
             	
@@ -1095,7 +1338,7 @@ public class WeatherGov   {
 		}).forEach(di->{
 			
 		});
-		//System.out.println(u);
+		
 	}
 	
 
