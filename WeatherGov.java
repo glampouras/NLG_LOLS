@@ -44,7 +44,7 @@ public class WeatherGov   {
 	
 	HashMap<String,HashMap<ArrayList<String>,Double>> valueAlignments = new HashMap<>();
 	ArrayList<ArrayList<String>> attributeFieldValueSequence = new ArrayList<>();
-	
+	HashMap<ArrayList<WeatherAction>,WeatherAction> punctuationPatterns = new HashMap<>();
 	//boolean debug = true;
 	public static void main(String[] args){
 		
@@ -953,14 +953,36 @@ public class WeatherGov   {
 	}
 	public void createTrainingData(){
 		createNaiveAlignments(trainingData);
+		ArrayList<ArrayList<String>> LMWordTraining = new ArrayList<>();
+		ArrayList<ArrayList<String>> LMFieldTraining = new ArrayList<>();
+		ArrayList<ArrayList<String>> LMAttrTraining = new ArrayList<>();
+		trainingData.stream().forEach((di)->{
+			HashSet<ArrayList<WeatherAction>> seqs = new HashSet<>();
+			seqs.add(di.getDirectReferenceSequence());
+			seqs.forEach(seq->{
+				ArrayList<String> wordSeq = new ArrayList<>();
+				ArrayList<String> attrFieldSeq = new ArrayList<>();
+				ArrayList<String> attrSeq = new ArrayList<>();
+				wordSeq.add("@@");
+                wordSeq.add("@@");
+                attrSeq.add("@@");
+                attrSeq.add("@@");
+                attrFieldSeq.add("@@");
+                attrFieldSeq.add("@@");
+                
+				
+			});
+			
+		});
 		
 		
 		
 	}
 	
 	public void createNaiveAlignments(ArrayList<WeatherDatasetInstance> trainingData){
-		
-		
+		HashMap<WeatherDatasetInstance,ArrayList<WeatherAction>> punctRealizations = new HashMap<>();
+		HashMap<ArrayList<WeatherAction>,HashMap<WeatherAction,Integer>> punctPatterns = new HashMap<>();
+		System.out.println("create Naive Alignments");
 		trainingData.stream().map(di->{
 			
 			HashMap<ArrayList<WeatherAction>, ArrayList<WeatherAction>> calculatedRealizationsCache = new HashMap<>();//key directReferenceSequence
@@ -969,6 +991,11 @@ public class WeatherGov   {
                 initRealizations.add(di.getDirectReferenceSequence());
             }
             initRealizations.stream().map((realization) -> {
+            	/*
+            	for(int i=0;i<realization.size();i++){
+            		System.out.print(realization.get(i).getWord());
+            	}
+            	System.out.println("\n");*/
             	HashMap<String, HashMap<String,String>> values = new HashMap<>();
             	values.putAll(di.getMR().getAttrFieldValue());
             	ArrayList<WeatherAction> randomRealization = new ArrayList<>();
@@ -1071,7 +1098,11 @@ public class WeatherGov   {
                             }
                 		}
                 	}
-                }
+                }/*
+                for(int i=0;i<randomRealization.size();i++){
+            		System.out.print(randomRealization.get(i).getWord()+" ");
+            	}
+            	System.out.println("\n");*/
             /*   
             for(int i=0;i<randomRealization.size();i++){
             	System.out.print(randomRealization.get(i).getWord()+" ");
@@ -1178,6 +1209,8 @@ public class WeatherGov   {
                 		}
                 	}
                 }
+                
+                
                 /*
                 //backwards
                 
@@ -1277,68 +1310,203 @@ public class WeatherGov   {
                 //System.out.println("\n");
                 
                 //filter out punctuation
-                ArrayList<WeatherAction> cleanRandomRealization = new ArrayList<>();
-                randomRealization.stream().filter((a)->(!a.getWord().equals(WeatherAction.TOKEN_PUNCT))).forEachOrdered(a->{
-                	cleanRandomRealization.add(a);
-                });
+                //ArrayList<WeatherAction> cleanRandomRealization = new ArrayList<>();
+                //randomRealization.stream().filter((a)->(!a.getWord().equals(WeatherAction.TOKEN_PUNCT))).forEachOrdered(a->{
+                	//cleanRandomRealization.add(a);
+                //});
                 
                 //add end token
                 ArrayList<WeatherAction> endAttrRealization = new ArrayList<>();
                 ArrayList<WeatherAction> endFieldRealization = new ArrayList<>();
-                previousAttr = "";
-                previousField = "";
-                for(int i=0;i<cleanRandomRealization.size();i++){
-                	WeatherAction a  = cleanRandomRealization.get(i);
+                previousAttr = randomRealization.get(0).getAttribute();
+                previousField = randomRealization.get(0).getField();
+                for(int i=0;i<randomRealization.size();i++){
+                	WeatherAction a  = randomRealization.get(i);
                 	
-                	if(!a.getAttribute().isEmpty()
-                			&&!a.getField().isEmpty()
-                			&&!a.getAttribute().equals(previousAttr)){
-                		endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
-                		endAttrRealization.add(a);
-                        
+                	if(!a.getAttribute().equals(WeatherAction.TOKEN_PUNCT)){
+                		
+                		if(!a.getAttribute().isEmpty()
+                				&&!a.getField().isEmpty()
+                				&&!a.getAttribute().equals(previousAttr)){
+                			if(randomRealization.get(i-1).getAttribute().equals(WeatherAction.TOKEN_PUNCT)
+                					){
+                			//endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                			endAttrRealization.add(a);
+                			}else{
+                				endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                    			endAttrRealization.add(a);
+                			}
+                			
+                		}else{
+                			endAttrRealization.add(a);
+                		}
+                	}else{
+                		if(i!=randomRealization.size()-1){
+                			if(!randomRealization.get(i-1).getAttribute().equals(randomRealization.get(i+1).getAttribute())){
+                				endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                    			endAttrRealization.add(a);
+                			}
+                		}
+                		else{
+                			endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                			endAttrRealization.add(a);
+                			
+                		}
                 	}
-                	if(!a.getAttribute().isEmpty()
-                			&&!a.getField().isEmpty()
-                			&&!a.getField().equals(previousField)){
-                		endFieldRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
-                		endFieldRealization.add(a);
+                	//endAttrRealization.add(a);
+                		
+                	if(!a.getAttribute().equals(WeatherAction.TOKEN_PUNCT)){
+                		if(!a.getAttribute().isEmpty()
+                				&&!a.getField().isEmpty()
+                				&&(!a.getField().equals(previousField)
+                				||!a.getAttribute().equals(previousAttr))){
+                			endFieldRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                		
                         
+                		}
+                	//endFieldRealization.add(a);
+                		previousAttr = a.getAttribute();
+                		previousField = a.getField();
                 	}
-                	
-                	previousAttr = a.getAttribute();
-                    previousField = a.getField();
                 }
-                endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                //get maxFieldLength and maxAttributeLength with end token added
+                //endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
                 endFieldRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
                 endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,WeatherAction.TOKEN_END,WeatherAction.TOKEN_END));
                 endFieldRealization.add(new WeatherAction(WeatherAction.TOKEN_END,WeatherAction.TOKEN_END,WeatherAction.TOKEN_END));
+                calculatedRealizationsCache.put(realization, endAttrRealization);
+                
                 ArrayList<String> attrValues = new ArrayList<String>();
                 ArrayList<String> fieldValues = new ArrayList<String>();
                 endAttrRealization.forEach((a) -> {
+                	if(!a.getAttribute().equals(WeatherAction.TOKEN_PUNCT)){
                     if (attrValues.isEmpty()) {
                         attrValues.add(a.getAttribute());
                     } else if (!attrValues.get(attrValues.size() - 1).equals(a.getAttribute())) {
                         attrValues.add(a.getAttribute());
                     }
+                	}
                 });
-                endFieldRealization.forEach((a) -> {
+                endAttrRealization.forEach((a) -> {
                     if (fieldValues.isEmpty()) {
                     	fieldValues.add(a.getField());
                     } else if (!fieldValues.get(fieldValues.size() - 1).equals(a.getField())) {
                     	fieldValues.add(a.getField());
                     }
                 });
+                if (attrValues.size() > maxAttributeSequenceLength) {
+                	maxAttributeSequenceLength=attrValues.size();
+                }
+                if (endFieldRealization.size() > maxFieldSequenceLength) {
+                	maxFieldSequenceLength=endFieldRealization.size();
+                }/*
+                for(int i=0;i<endAttrRealization.size();i++){
+                	System.out.print(endAttrRealization.get(i).getAttribute()+":"+endAttrRealization.get(i).getWord()+" ");
+                }
+                System.out.println("\n");*/
+                ArrayList<WeatherAction> punctRealization = new ArrayList<>();
+                punctRealization.addAll(endAttrRealization);/*
+                previousAttr = "";
+                previousField = "";
+                for(int i=0;i<punctRealization.size();i++){
+                	if(!punctRealization.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)){
+                		if(!punctRealization.get(i).getAttribute().equals(previousAttr)
+                                && !previousAttr.isEmpty()){
+                			punctRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                		}
+                		previousAttr = punctRealization.get(i).getAttribute();
+                		previousField = punctRealization.get(i).getField();
+                	}
+                }
+                if(!punctRealization.get(punctRealization.size()-1).getWord().equals(WeatherAction.TOKEN_END)){
+                	punctRealization.add(new WeatherAction(WeatherAction.TOKEN_END,previousField,previousAttr));
+                }*/
                 
-                
-            	return realization;
-            }).forEach(realization->{
-            	
+            	return punctRealization;
+            }).map(punctRealization->{
+            	punctRealizations.put(di, punctRealization);
+            	return punctRealization;
+            }).forEachOrdered((punctRealization)->{
+            	for(int i=0;i<punctRealization.size();i++){
+            		if(punctRealization.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)){
+            			WeatherAction a = punctRealization.get(i);
+            			ArrayList<WeatherAction> surroundingActions = new ArrayList<>();
+            			if(i==1){
+            				surroundingActions.add(punctRealization.get(0));
+            				surroundingActions.add(punctRealization.get(2));
+            				surroundingActions.add(punctRealization.get(3));
+            				
+            			}
+            			else if(i==punctRealization.size()-2){
+            				surroundingActions.add(punctRealization.get(punctRealization.size()-3));
+            				surroundingActions.add(punctRealization.get(punctRealization.size()-4));
+            				surroundingActions.add(punctRealization.get(punctRealization.size()-1));
+            				
+            			}else{
+            				surroundingActions.add(punctRealization.get(i-2));
+            				surroundingActions.add(punctRealization.get(i-1));
+            				surroundingActions.add(punctRealization.get(i+2));
+            				surroundingActions.add(punctRealization.get(i+1));
+            			}
+            			if(!punctPatterns.containsKey(surroundingActions)){
+            				punctPatterns.put(surroundingActions, new HashMap<>());
+            			}
+            			if(!punctPatterns.get(surroundingActions).containsKey(a)){
+            				punctPatterns.get(surroundingActions).put(a, 1);
+            			}else{
+            				punctPatterns.get(surroundingActions).put(a, punctPatterns.get(surroundingActions).get(a)+1);
+            			}
+            		}
+            		
+            	}
             });
+            di.setDirectReferenceSequence(calculatedRealizationsCache.get(di.getDirectReferenceSequence()));
 			return di;
-		}).forEach(di->{
+		}).forEachOrdered(di->{
 			
 		});
 		
+		/*
+		punctPatterns.keySet().stream().forEach(surrounds->{
+			punctRealizations.keySet().stream().forEach(di->{
+				ArrayList<WeatherAction> punctRealization = punctRealizations.get(di) ;
+			int s = surrounds.size();
+				
+			for(int i=0;i<=punctRealization.size()-s;i++){
+				boolean find = true;
+				int j = 0;
+				while(j<s&&find){
+					if(!punctRealization.get(i+j).getWord().equals(surrounds.get(j).getWord())){
+						find = false;
+					}
+					j++;
+				}
+				if(find){
+					WeatherAction a = new WeatherAction("","","");
+					if(!punctPatterns.get(surrounds).containsKey(a)){
+            			punctPatterns.get(surrounds).put(a, 1);
+            		}else{
+            			punctPatterns.get(surrounds).put(a, punctPatterns.get(surrounds).get(a)+1);
+            		}
+				}
+			}
+			WeatherAction bestAction = null;
+			int bestCount = 0;
+			for(WeatherAction a :punctPatterns.get(surrounds).keySet()){
+				if(punctPatterns.get(surrounds).get(a)>bestCount){
+					bestCount = punctPatterns.get(surrounds).get(a);
+					bestAction = a;
+				}
+			}
+			if(!bestAction.getWord().isEmpty()){
+				punctuationPatterns.put(surrounds, bestAction);
+			}
+			
+		});
+	});*/
+		
+		//System.out.println(maxAttributeSequenceLength+" "+maxFieldSequenceLength);
+		System.out.println("finish!");
 	}
 	
 
