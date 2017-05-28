@@ -14,10 +14,15 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.regex.Matcher;
+import java.util.concurrent.ConcurrentHashMap;
+//import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import gnu.trove.map.hash.TObjectDoubleHashMap;
+import jarow.Instance;
 import similarity_measures.Levenshtein;
+import simpleLM.WeatherSimpleLM;
+
 
 
 
@@ -45,6 +50,16 @@ public class WeatherGov   {
 	HashMap<String,HashMap<ArrayList<String>,Double>> valueAlignments = new HashMap<>();
 	ArrayList<ArrayList<String>> attributeFieldValueSequence = new ArrayList<>();
 	HashMap<ArrayList<WeatherAction>,WeatherAction> punctuationPatterns = new HashMap<>();
+	WeatherSimpleLM wordLMs;
+	WeatherSimpleLM attrLMs;
+	WeatherSimpleLM fieldLMs;
+	HashSet<String> availableAttr ;
+	HashMap<String,HashSet<String>> availableFieldPerAttr ;
+	HashMap<String, HashMap<String,HashSet<WeatherAction>>> availableWordAction ;
+	private ArrayList<Instance> attributeTrainingData;
+	private HashMap<String,ArrayList<Instance>> fieldTrainingData;
+	private HashMap<String,HashMap<String,ArrayList<Instance>>> wordTrainingData;
+	
 	//boolean debug = true;
 	public static void main(String[] args){
 		
@@ -363,7 +378,7 @@ public class WeatherGov   {
 			
 			
 			
-			String attributeId;
+			String attribute;
 			ArrayList<String> ref = new ArrayList<>() ;
 			String MRstr = "";
 			ArrayList<String> align = new ArrayList<>();
@@ -406,10 +421,14 @@ public class WeatherGov   {
 				fields = eventLine.split("\\s+");
 				
 				if(!fields[fields.length-1].equals("@mode:--")){//filter out mode= -- , no use
-					attributeId = fields[0].split(":")[1];
-					attributes.add(attributeId);
-					if(!attributeFields.containsKey(attributeId)){
-						attributeFields.put(attributeId, new HashSet<String>());
+					attribute = fields[0].split(":")[1];
+					if(fields[1].split(":")[0].equals(".type")){
+						attribute = attribute+"#"+fields[1].split(":")[1];
+					}
+					 
+					attributes.add(attribute);
+					if(!attributeFields.containsKey(attribute)){
+						attributeFields.put(attribute, new HashSet<String>());
 					}
 					for(int i = 1;  i<fields.length;i++){
 						/*
@@ -448,25 +467,25 @@ public class WeatherGov   {
 								}
 								if(field!=null&&value!=null){
 									//populate attributeFieldValuePairs
-									if(!attributeFieldValuePairs.containsKey(attributeId)){
-										attributeFieldValuePairs.put(attributeId, new HashMap<>());
+									if(!attributeFieldValuePairs.containsKey(attribute)){
+										attributeFieldValuePairs.put(attribute, new HashMap<>());
 									} 
-									if(!attributeFieldValuePairs.get(attributeId).containsKey(field)){
-										attributeFieldValuePairs.get(attributeId).put(field, new HashSet<>());
+									if(!attributeFieldValuePairs.get(attribute).containsKey(field)){
+										attributeFieldValuePairs.get(attribute).put(field, new HashSet<>());
 									}
 										
-									attributeFieldValuePairs.get(attributeId).get(field).add(value);
+									attributeFieldValuePairs.get(attribute).get(field).add(value);
 									
 									//populate attrFieldValue
 									//for every MR
-									if(!attrFieldValue.containsKey(attributeId)){
+									if(!attrFieldValue.containsKey(attribute)){
 										
-										attrFieldValue.put(attributeId, new HashMap<>());
+										attrFieldValue.put(attribute, new HashMap<>());
 									}
-									if(!attrFieldValue.get(attributeId).containsKey(field)){
-										attrFieldValue.get(attributeId).put(field,value);
+									if(!attrFieldValue.get(attribute).containsKey(field)){
+										attrFieldValue.get(attribute).put(field,value);
 									}
-									attributeFields.get(attributeId).add(field);
+									attributeFields.get(attribute).add(field);
 									
 									if(!fieldValues.containsKey(field)){
 										fieldValues.put(field, new HashSet<>());
@@ -487,7 +506,7 @@ public class WeatherGov   {
 				}
 				
 			}//end reading each file
-			
+			/*
 			HashMap<String,HashSet<String>> textAttrIdAlignment = new  HashMap<>();
 			HashSet<String> alignedAttrRecord = new HashSet<>();
 			if(!attrFieldValue.isEmpty()
@@ -515,7 +534,7 @@ public class WeatherGov   {
 				
 				}
 			}
-			
+			*/
 			
 			/*
 			 * for each align file, check if retain the unique time attributes is right
@@ -537,23 +556,65 @@ public class WeatherGov   {
 				}
 			}
 			*/
-			
-			
+			//for each figure in the text, find the closest figure in the MR, and change it with a label e.g. @attribute+field
+			String refStr = String.join("", ref);
+			String[] words = refStr.replaceAll("([.,])", WeatherAction.TOKEN_PUNCT).split("\\s+");
+			ArrayList<String> observedAttrFieldValueSequence = new ArrayList<>();
+            ArrayList<String> observedWordSequence = new ArrayList<>();
+            HashMap<String,String> deleMap = new HashMap<>();
+			for(String w:words){
+				if(w.matches("([0-9]+)")){
+					String minValue = "";
+					String minAttr = "";
+					String minField = "";
+					int min = 100;
+					for(String attr:attrFieldValue.keySet()){
+						for(String field:attrFieldValue.get(attr).keySet()){
+							String value = attrFieldValue.get(attr).get(field);
+							if(value.matches("[0-9]+")){
+								if(Math.abs(Integer.parseInt(value)-Integer.parseInt(w))<min){
+									min = Math.abs(Integer.parseInt(value)-Integer.parseInt(w));
+									minValue = value;
+									minField = field;
+									minAttr = attr;
+									
+								}
+							}
+						}
+					}
+				if(!minValue.isEmpty()&&min<=5&&!minValue.contains("X")){	
+					
+					attrFieldValue.get(minAttr).put(minField, "X:"+minAttr+":"+minField);
+					deleMap.put(minValue, "X:"+minAttr+":"+minField);
+					if(MRstr.contains(minValue)){
+						MRstr = MRstr.replace(minValue, "X:"+minAttr+":"+minField);
+					}
+					if(refStr.contains(w)){
+						refStr = refStr.replace(w, "X:"+minAttr+":"+minField);
+					}
+					
+					
+					observedWordSequence.add("X:"+minAttr+":"+minField);
+					
+				}
+				}else{
+					observedWordSequence.add(w.trim().toLowerCase());
+				}
+			}
 			
 			
 			//  for each instance build MR
-			WeatherMeaningRepresentation MR = new WeatherMeaningRepresentation(attrFieldValue,MRstr);
+			WeatherMeaningRepresentation MR = new WeatherMeaningRepresentation(attrFieldValue,MRstr,deleMap);
 			
 			//start build DatasetInstance
-			ArrayList<String> observedAttrFieldValueSequence = new ArrayList<>();
-            ArrayList<String> observedWordSequence = new ArrayList<>();
-            String refStr = String.join("", ref);
-            String[] words = refStr.replaceAll("([.,])", WeatherAction.TOKEN_PUNCT).split("\\s+");
+			
+            
+            /*
             for(String w : words){
             	//if((!w.isEmpty())&&(observedWordSequence.isEmpty()||w.trim().equals(observedWordSequence.get(observedWordSequence.size()-1)if((!w.isEmpty())&&(observedWordSequence.isEmpty()||w.trim().equals(observedWordS))){
             		observedWordSequence.add(w.trim().toLowerCase());
             	//}
-            }
+            }*/
             //System.out.println(observedWordSequence);
             if(observedWordSequence.size()>maxWordSequenceLength){
             	maxWordSequenceLength = observedWordSequence.size();
@@ -562,7 +623,10 @@ public class WeatherGov   {
             observedWordSequence.forEach((word) -> {
                 if (word.trim().matches(WeatherAction.TOKEN_PUNCT) ){
                     wordToAttrFieldValueAlignment.add(WeatherAction.TOKEN_PUNCT);
-                } else {
+                }else if(word.contains("X")){
+                	wordToAttrFieldValueAlignment.add(word.split(":")[1]+"="+word.split(":")[2]+"="+word);
+                }
+                else {
                     wordToAttrFieldValueAlignment.add("[]");
                 }
             });
@@ -571,13 +635,16 @@ public class WeatherGov   {
             }
             ArrayList<WeatherAction> directReferenceSequence = new ArrayList<>();
             for (int r = 0; r < observedWordSequence.size(); r++) {
-                directReferenceSequence.add(new WeatherAction(observedWordSequence.get(r),wordToAttrFieldValueAlignment.get(r),""));
+            	
+            	directReferenceSequence.add(new WeatherAction(observedWordSequence.get(r),wordToAttrFieldValueAlignment.get(r),wordToAttrFieldValueAlignment.get(r)));
+            	
             } 
+            
             /*
              * build DI
              * */
             
-            WeatherDatasetInstance DI = new WeatherDatasetInstance(MR,directReferenceSequence,"");
+            WeatherDatasetInstance DI = new WeatherDatasetInstance(MR,directReferenceSequence,postProcessRef(MR, directReferenceSequence));
             DI.city  = city;
             DI.date = date;
             DI.state = state;
@@ -611,7 +678,8 @@ public class WeatherGov   {
             		String valueToCompare;
             		if(!Pattern.matches("([0-9]+)", MR.getAttrFieldValue().get(attr).get(field))&&!
             				(field.equals("time")||field.equals("max")||field.equals("mean")||field.equals("min")
-            						||Pattern.matches("([0-9]+)-([0-9]+)",MR.getAttrFieldValue().get(attr).get(field) ))){
+            						||Pattern.matches("([0-9]+)-([0-9]+)",MR.getAttrFieldValue().get(attr).get(field) ))
+            				&&!MR.getAttrFieldValue().get(attr).get(field).contains("X")){
             			
             		/*
             		if(Pattern.matches("([0-9]+)", valueToCompare)){
@@ -798,16 +866,20 @@ public class WeatherGov   {
 		String cleanedWords = "";
 		for(WeatherAction nlWord : directReferenceSequence){
 			if(!nlWord.equals(new WeatherAction("","",WeatherAction.TOKEN_START))
-					&&nlWord.equals(new WeatherAction("","",WeatherAction.TOKEN_END))){
+					&&!nlWord.equals(new WeatherAction("","",WeatherAction.TOKEN_END))){
+				if(nlWord.getWord().startsWith("X")){
+					cleanedWords+=" "+mr.getDeleMap().get(nlWord.getWord());
+				}else{
 				cleanedWords += " " + nlWord.getWord();
-				
+				}
 			}
 			
 			
 			
 		}
-		cleanedWords = cleanedWords.trim()+ ".";
-		
+		if(!cleanedWords.endsWith(".")){
+			cleanedWords = cleanedWords.trim()+ ".";
+		}
 		
 		return cleanedWords;
 	}
@@ -953,31 +1025,342 @@ public class WeatherGov   {
 	}
 	public void createTrainingData(){
 		createNaiveAlignments(trainingData);
-		ArrayList<ArrayList<String>> LMWordTraining = new ArrayList<>();
-		ArrayList<ArrayList<String>> LMFieldTraining = new ArrayList<>();
-		ArrayList<ArrayList<String>> LMAttrTraining = new ArrayList<>();
-		trainingData.stream().forEach((di)->{
-			HashSet<ArrayList<WeatherAction>> seqs = new HashSet<>();
-			seqs.add(di.getDirectReferenceSequence());
-			seqs.forEach(seq->{
-				ArrayList<String> wordSeq = new ArrayList<>();
-				ArrayList<String> attrFieldSeq = new ArrayList<>();
-				ArrayList<String> attrSeq = new ArrayList<>();
-				wordSeq.add("@@");
-                wordSeq.add("@@");
-                attrSeq.add("@@");
-                attrSeq.add("@@");
-                attrFieldSeq.add("@@");
-                attrFieldSeq.add("@@");
+		if(!loadLMs()){
+			ArrayList<ArrayList<String>> LMWordTraining = new ArrayList<>();
+			ArrayList<ArrayList<String>> LMFieldTraining = new ArrayList<>();
+			ArrayList<ArrayList<String>> LMAttrTraining = new ArrayList<>();
+			trainingData.stream().forEach((di)->{
+				HashSet<ArrayList<WeatherAction>> seqs = new HashSet<>();
+				seqs.add(di.getDirectReferenceSequence());
+				seqs.forEach(seq->{
+					ArrayList<String> wordSeq = new ArrayList<>();
+					ArrayList<String> attrFieldSeq = new ArrayList<>();
+					ArrayList<String> attrSeq = new ArrayList<>();
+					wordSeq.add("@@");
+					wordSeq.add("@@");
+					attrSeq.add("@@");
+					attrSeq.add("@@");
+					attrFieldSeq.add("@@");
+					attrFieldSeq.add("@@");
                 
+					for(int i=0;i<seq.size();i++){
+						if(!seq.get(i).getAttribute().equals(WeatherAction.TOKEN_END)
+							&&!seq.get(i).getField().equals(WeatherAction.TOKEN_END)
+							&&!seq.get(i).getWord().equals(WeatherAction.TOKEN_END)
+							&&!seq.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)
+							&&!seq.get(i).getField().equals(WeatherAction.TOKEN_PUNCT)
+							&&!seq.get(i).getWord().equals(WeatherAction.TOKEN_PUNCT)){
+							wordSeq.add(seq.get(i).getWord());
+						
+						
+						}
+						if(!seq.get(i).getAttribute().equals(WeatherAction.TOKEN_PUNCT)){
+							if (attrSeq.isEmpty()) {
+								attrSeq.add(seq.get(i).getAttribute().split("=")[0]);
+							} else if (!attrSeq.get(attrSeq.size() - 1).equals(seq.get(i).getAttribute().split("=")[0])) {
+								attrSeq.add(seq.get(i).getAttribute().split("=")[0]);
+							}
+							if(attrFieldSeq.isEmpty()){
+								attrFieldSeq.add(seq.get(i).getField().split("=")[0]
+										+"="+seq.get(i).getField().split("=")[1]);
+							}
+						}
+					
+					}
+					wordSeq.add(WeatherAction.TOKEN_END);
 				
-			});
+					LMWordTraining.add(wordSeq);
+					LMAttrTraining.add(attrSeq);
+					LMFieldTraining.add(attrFieldSeq);
+					// we didn't use language model for field, may be will add it later
+				});
 			
-		});
+			});
+			wordLMs  = new WeatherSimpleLM(3);
+			attrLMs = new WeatherSimpleLM(3);
+			fieldLMs = new WeatherSimpleLM(3);
+			wordLMs.trainOnStrings(LMWordTraining);
+			attrLMs.trainOnStrings(LMAttrTraining);
+			fieldLMs.trainOnStrings(LMFieldTraining);
+			writeLMs();
+		}
+		// Go through the sequences in the data and populate the available content and word action dictionaries
+        // We populate a distinct word dictionary for each attribute, 
+		//and populate it with the words of word sequences whose corresponding content sequences contain that attribute
+		availableAttr = new HashSet<>();
+		availableFieldPerAttr = new HashMap<>();
+		availableWordAction = new HashMap<>();
+		for(WeatherDatasetInstance di : trainingData){
+		
+			
+			for(String attribute : di.getMR().getAttrFieldValue().keySet()){
+				if(!availableAttr.contains(attribute)){
+					availableAttr.add(attribute);
+					availableAttr.add(WeatherAction.TOKEN_END);
+				}
+				for(String field : di.getMR().getAttrFieldValue().get(attribute).keySet()){
+					//String word = a.getWord();
+					
+					if(!availableFieldPerAttr.containsKey(attribute)){
+						availableFieldPerAttr.put(attribute, new HashSet<>());
+					}
+					
+					availableFieldPerAttr.put(WeatherAction.TOKEN_END, new HashSet<>());
+					
+					availableFieldPerAttr.get(attribute).add(attribute+"="+field);
+					availableFieldPerAttr.get(attribute).add(WeatherAction.TOKEN_END);
+					if(!availableWordAction.containsKey(attribute)){
+						availableWordAction.put(attribute, new HashMap<>());
+					}
+					availableWordAction.put(WeatherAction.TOKEN_END, new HashMap<>());
+					if(!availableWordAction.get(attribute).containsKey(attribute+"="+field)){
+						availableWordAction.get(attribute).put(field, new HashSet<>());
+					}
+					availableWordAction.get(WeatherAction.TOKEN_END).put(WeatherAction.TOKEN_END, new HashSet<>());
+					for(WeatherAction a : di.getDirectReferenceSequence()){
+						if(!a.getWord().equals(WeatherAction.TOKEN_PUNCT)){
+							availableWordAction.get(attribute).get(field).add(a);
+							
+						}
+					}
+					availableWordAction.get(attribute).get(field).add(new WeatherAction(attribute,field,WeatherAction.TOKEN_END));
+					availableWordAction.get(WeatherAction.TOKEN_END).get(WeatherAction.TOKEN_END).add(new WeatherAction(WeatherAction.TOKEN_END
+							,WeatherAction.TOKEN_END,WeatherAction.TOKEN_END));
+				}
+			}
+					
+					
+					
+		
+		
+		}
+		if(!loadTrainingData(trainingData.size())){
+			System.out.print("Create training data...");
+			Object[] results = inferFeatureAndCostVectors();
+            System.out.print("almost...");
+		}
+		
+		
+		
 		
 		
 		
 	}
+	@SuppressWarnings("unchecked")
+	public boolean loadTrainingData(int dataSize){
+		String file1 = "cache/attrTrainingData" + "_" + dataSize;
+        String file2 = "cache/wordTrainingData" + "_" + dataSize;
+        String file3 = "cache/fieldTrainingData" + "_" + dataSize;
+        FileInputStream fin1 = null;
+        ObjectInputStream ois1 = null;
+        FileInputStream fin2 = null;
+        ObjectInputStream ois2 = null;
+        FileInputStream fin3 = null;
+        ObjectInputStream ois3 = null;
+        if ((new File(file1)).exists()
+                && (new File(file2)).exists()
+                &&(new File(file3)).exists()) {
+        	try{
+        		System.out.println("loading training data");
+        		fin1 = new FileInputStream(file1);
+                ois1 = new ObjectInputStream(fin1);
+                Object o1 = ois1.readObject();
+                if(getAttributeTrainingData()==null){
+                	if(o1 instanceof ArrayList){
+                		setAttributeTrainingData(new ArrayList<>((Collection<? extends Instance>) o1));
+                	}
+                }else if(o1 instanceof ArrayList){
+                	getAttributeTrainingData().addAll(new ArrayList<>((Collection<? extends Instance>) o1));
+                }
+                fin2 = new FileInputStream(file2);
+                ois2 = new ObjectInputStream(fin2);
+                Object o2 = ois2.readObject();
+                if(getWordTrainingData()==null){
+                	if(o2 instanceof HashMap){
+                		setWordTrainingData(new HashMap<>( (Map<? extends String, ? extends HashMap<String, ArrayList<Instance>>>)o2));
+                	}
+                }else if(o2 instanceof HashMap){
+                	getWordTrainingData().putAll(new HashMap<>( (Map<? extends String, ? extends HashMap<String, ArrayList<Instance>>>)o2));
+                }
+                fin3 = new FileInputStream(file3);
+                ois3 = new ObjectInputStream(fin3);
+                Object o3 = ois3.readObject();
+                if(getFieldTrainingData()==null){
+                	if(o3 instanceof HashMap){
+                		setFieldTrainingData(new HashMap<>((Map<? extends String, ? extends ArrayList<Instance>>)o3));
+                	}
+                	
+                }else if(o3 instanceof HashMap){
+                	getFieldTrainingData().putAll(new HashMap<>((Map<? extends String, ? extends ArrayList<Instance>>)o3));
+                }
+                
+                
+        		
+        	}catch(Exception ex){
+        		
+        	}finally{
+        		try {
+                    fin1.close();
+                    fin2.close();
+                    fin3.close();
+                } catch (IOException ex) {
+                }
+                try {
+                    ois1.close();
+                    ois2.close();
+                    ois3.close();
+                } catch (IOException ex) {
+                }
+        		
+        	}
+        }else{
+        	return false;
+        }
+        return true;
+
+	}
+	public void writeTrainingData(int dataSize){
+		String file1 = "cache/attrTrainingData" + "_" + dataSize;
+        String file2 = "cache/wordTrainingData" + "_" + dataSize;
+        String file3 = "cache/fieldTrainingData" + "_" + dataSize;
+        FileOutputStream fout1 = null;
+        ObjectOutputStream oos1 = null;
+        FileOutputStream fout2 = null;
+        ObjectOutputStream oos2 = null;
+        FileOutputStream fout3 = null;
+        ObjectOutputStream oos3 = null;
+        try {
+            System.out.print("Write Training Data...");
+            fout1 = new FileOutputStream(file1);
+            oos1 = new ObjectOutputStream(fout1);
+            oos1.writeObject(getAttributeTrainingData());
+
+            fout2 = new FileOutputStream(file2);
+            oos2 = new ObjectOutputStream(fout2);
+            oos2.writeObject(getWordTrainingData());
+            
+            fout3 = new FileOutputStream(file3);
+            oos3 = new ObjectOutputStream(fout3);
+            oos3.writeObject(getFieldTrainingData());
+            
+            
+
+        } catch (IOException ex) {
+        } finally {
+            try {
+                fout1.close();
+                fout2.close();
+                fout3.close();
+            } catch (IOException ex) {
+            }
+            try {
+                oos1.close();
+                oos2.close();
+                oos3.close();
+            } catch (IOException ex) {
+            }
+        }
+        
+        
+		
+	}
+	public void writeLMs() {
+        String file2 = "cache/wordLMs" ;
+        String file3 = "cache/attrLMs"  ;
+        String file1 = "cache/fieldLMs";
+        FileOutputStream fout1 = null;
+        ObjectOutputStream oos1 = null;
+        FileOutputStream fout2 = null;
+        ObjectOutputStream oos2 = null;
+        FileOutputStream fout3 = null;
+        ObjectOutputStream oos3 = null;
+        try {
+            System.out.print("Write LMs...");
+            fout1 = new FileOutputStream(file1);
+            oos1 = new ObjectOutputStream(fout1);
+            oos1.writeObject(fieldLMs);
+            
+            fout2 = new FileOutputStream(file2);
+            oos2 = new ObjectOutputStream(fout2);
+            oos2.writeObject(wordLMs);
+
+            fout3 = new FileOutputStream(file3);
+            oos3 = new ObjectOutputStream(fout3);
+            oos3.writeObject(attrLMs);
+        } catch (IOException ex) {
+        } finally {
+            try {
+            	fout1.close();
+                fout2.close();
+                fout3.close();
+            } catch (IOException ex) {
+            }
+            try {
+            	oos1.close();
+                oos2.close();
+                oos3.close();
+            } catch (IOException ex) {
+            }
+            
+        }
+    }
+	public boolean loadLMs() {
+		String file1 = "cache/fieldLMs" ;
+        String file2 = "cache/wordLMs" ;
+        String file3 = "cache/attrLMs";
+        FileInputStream fin1 = null;
+        ObjectInputStream ois1 = null;
+        FileInputStream fin2 = null;
+        ObjectInputStream ois2 = null;
+        FileInputStream fin3 = null;
+        ObjectInputStream ois3 = null;
+        if ((new File(file2)).exists()
+                && (new File(file3)).exists()
+                &&(new File(file1)).exists()) {
+            try {
+                System.out.print("Load language models...");
+                fin1 = new FileInputStream(file1);
+                ois1 = new ObjectInputStream(fin1);
+                Object o1 = ois1.readObject();
+                
+                if (o1 instanceof WeatherSimpleLM) {
+                	fieldLMs = (WeatherSimpleLM) o1;
+                }
+                
+                fin2 = new FileInputStream(file2);
+                ois2 = new ObjectInputStream(fin2);
+                Object o2 = ois2.readObject();
+                
+                if (o2 instanceof WeatherSimpleLM) {
+                	wordLMs = (WeatherSimpleLM) o2;
+                }
+               
+
+                fin3 = new FileInputStream(file3);
+                ois3 = new ObjectInputStream(fin3);
+                Object o3 = ois3.readObject();
+                if(o3 instanceof WeatherSimpleLM){
+                	attrLMs = (WeatherSimpleLM) o3;
+                }
+
+            } catch (ClassNotFoundException | IOException ex) {
+            } finally {
+                try {
+                    fin2.close();
+                    fin3.close();
+                } catch (IOException ex) {
+                }
+                try {
+                    ois2.close();
+                    ois3.close();
+                } catch (IOException ex) {
+                }
+            }
+        } else {
+            return false;
+        }
+        return true;
+    }
 	
 	public void createNaiveAlignments(ArrayList<WeatherDatasetInstance> trainingData){
 		HashMap<WeatherDatasetInstance,ArrayList<WeatherAction>> punctRealizations = new HashMap<>();
@@ -1002,13 +1385,14 @@ public class WeatherGov   {
             	for(int i=0;i<realization.size();i++){
             		WeatherAction a = realization.get(i);
             		
-            		if(a.getField().equals(WeatherAction.TOKEN_PUNCT)){
-            			//System.out.println(a.getField());
+            		if(a.getWord().equals(WeatherAction.TOKEN_PUNCT)||a.getWord().contains("X")){
+            			
             			randomRealization.add(new WeatherAction(a.getWord(),a.getField(),a.getField()));
             		}else{
             			randomRealization.add(new WeatherAction(a.getWord(),"",""));
             		}
             	}
+            	
             	//indexAlignments
             	
             	HashMap<Double, HashMap<String, ArrayList<Integer>>> indexAlignments = new HashMap<>();
@@ -1017,7 +1401,8 @@ public class WeatherGov   {
             			String value = values.get(attr).get(field);
             			if(!Pattern.matches("([0-9]+)", value)&&!
                 				(field.equals("time")||field.equals("max")||field.equals("mean")||field.equals("min")
-                						||Pattern.matches("([0-9]+)-([0-9]+)",value ))&&valueAlignments.containsKey(value)){
+                						||Pattern.matches("([0-9]+)-([0-9]+)",value ))&&valueAlignments.containsKey(value)
+                				&&!value.contains("X")){
             				String valueToCheck = value;
             				if(valueToCheck.equals("windDir")){
             					valueToCheck = "wind Dir";
@@ -1091,8 +1476,8 @@ public class WeatherGov   {
                 				assignedAttrFieldValues.add(attrFieldValue);
                                 for (Integer index : indexAlignments.get(similarities.get(i)).get(attrFieldValue)) {
                                     assignedIntegers.add(index);
-                                    randomRealization.get(index).setAttribute(attrFieldValue.split("=")[0].toLowerCase().trim());
-                                    randomRealization.get(index).setField(attrFieldValue.split("=")[1].toLowerCase().trim());
+                                    randomRealization.get(index).setAttribute(attrFieldValue.toLowerCase().trim());
+                                    randomRealization.get(index).setField(attrFieldValue.toLowerCase().trim());
                                     
                                 }
                             }
@@ -1375,7 +1760,7 @@ public class WeatherGov   {
                 endAttrRealization.add(new WeatherAction(WeatherAction.TOKEN_END,WeatherAction.TOKEN_END,WeatherAction.TOKEN_END));
                 endFieldRealization.add(new WeatherAction(WeatherAction.TOKEN_END,WeatherAction.TOKEN_END,WeatherAction.TOKEN_END));
                 calculatedRealizationsCache.put(realization, endAttrRealization);
-                
+                /*
                 ArrayList<String> attrValues = new ArrayList<String>();
                 ArrayList<String> fieldValues = new ArrayList<String>();
                 endAttrRealization.forEach((a) -> {
@@ -1399,9 +1784,9 @@ public class WeatherGov   {
                 }
                 if (endFieldRealization.size() > maxFieldSequenceLength) {
                 	maxFieldSequenceLength=endFieldRealization.size();
-                }/*
+                }*//*
                 for(int i=0;i<endAttrRealization.size();i++){
-                	System.out.print(endAttrRealization.get(i).getAttribute()+":"+endAttrRealization.get(i).getWord()+" ");
+                	System.out.print(endAttrRealization.get(i).getAttribute()+"=="+endAttrRealization.get(i).getWord()+"   ");
                 }
                 System.out.println("\n");*/
                 ArrayList<WeatherAction> punctRealization = new ArrayList<>();
@@ -1505,9 +1890,910 @@ public class WeatherGov   {
 		});
 	});*/
 		
-		//System.out.println(maxAttributeSequenceLength+" "+maxFieldSequenceLength);
+		
 		System.out.println("finish!");
 	}
-	
+	public Instance createAttributeInstance(String bestAction,ArrayList<String> previousGeneratedAttrs
+			,HashSet<String> attrsAlreadyMentioned,HashSet<String> attrsToBeMentioned
+			,WeatherMeaningRepresentation MR, HashSet<String> availableAttr){
+		TObjectDoubleHashMap<String> costs = new TObjectDoubleHashMap<>();
+		
+		if(!bestAction.isEmpty()){
+			//COSTS
+			if(bestAction.equals(WeatherAction.TOKEN_END)){
+				costs.put(WeatherAction.TOKEN_END, 0.0);
+				availableAttr.stream().forEach(attribute->{
+					costs.put(attribute, 1.0);
+				});
+			}else{
+				costs.put(WeatherAction.TOKEN_END, 1.0);
+				availableAttr.stream().forEach(attribute->{
+					if(attributeFields.equals(bestAction.split("=")[0])){
+						costs.put(attribute, 0.0);
+					}else{
+						costs.put(attribute, 1.0);
+					}
+				});
+				
+			}
+		}
+		
+		return createContentInstanceWithCosts( costs, previousGeneratedAttrs
+				, attrsAlreadyMentioned, attrsToBeMentioned
+				, availableAttr, MR);
+		
+		
+	}
+	public Instance createContentInstanceWithCosts(TObjectDoubleHashMap<String> costs,ArrayList<String> previousGeneratedAttrs
+			,HashSet<String> attrsAlreadyMentioned,HashSet<String> attrsToBeMentioned
+			,HashSet<String> availableAttr,WeatherMeaningRepresentation MR){
+		TObjectDoubleHashMap<String> generalFeatures = new TObjectDoubleHashMap<>();
+        HashMap<String, TObjectDoubleHashMap<String>> valueSpecificFeatures = new HashMap<>();
+        availableAttr.stream().forEach(attribute->{
+        	valueSpecificFeatures.put(attribute, new TObjectDoubleHashMap<String>());
+        });
+        //previous generated attrs
+        ArrayList<String> mentionedAttr = new ArrayList<>();
+        previousGeneratedAttrs.stream().filter((attrFieldValue)->(!attrFieldValue.equals(WeatherAction.TOKEN_END)&&
+        		!attrFieldValue.equals(WeatherAction.TOKEN_START))).forEach((attribute)->{
+        			String attr = attribute;
+        			if(attribute.contains("=")){
+        				 attr = attribute.split("=")[0];
+        			}
+        			
+        			if(!mentionedAttr.get(mentionedAttr.size()-1).equals(attr)){
+        				mentionedAttr.add(attr);
+        			}
+        		});
+        
+        //general features
+        for (int j = 1; j <= 1; j++) {
+            String previousAttr = "@@";
+            if (mentionedAttr.size() - j >= 0) {
+            	previousAttr = mentionedAttr.get(mentionedAttr.size() - j).trim();
+            }
+            generalFeatures.put("feature_attr_" + j + "_" + previousAttr, 1.0);
+        }
+        //previous attribute N-Grams
+        String previousAttr = "@@";
+        String prevTimeValue = "";
+        if (mentionedAttr.size() - 1 >= 0) {
+        	previousAttr = mentionedAttr.get(mentionedAttr.size() - 1).trim();
+        	if(!previousAttr.equals(WeatherAction.TOKEN_END)&&MR.getAttrFieldValue().containsKey(previousAttr)){
+        		for(String field : MR.getAttrFieldValue().get(previousAttr).keySet()){
+        			if(field.contains("time")){
+        				prevTimeValue = MR.getAttrFieldValue().get(previousAttr).get(field);
+        			}
+        		}
+        	}
+        	
+        }
+        String previous2Attr = "@@";
+        String prev2TimeValue = "";
+        if (mentionedAttr.size() - 2 >= 0) {
+        	previous2Attr = mentionedAttr.get(mentionedAttr.size() - 2).trim();
+        	if(!previous2Attr.equals(WeatherAction.TOKEN_END)&&MR.getAttrFieldValue().containsKey(previous2Attr)){
+        		for(String field: MR.getAttrFieldValue().get(previous2Attr).keySet()){
+        			if(field.contains("time")){
+        				prev2TimeValue = MR.getAttrFieldValue().get(previous2Attr).get(field);
+        			}
+        		}
+        	}
+        }
+        String previous3Attr = "@@";
+        String prev3TimeValue = "";
+        if (mentionedAttr.size() - 3 >= 0) {
+        	previous3Attr = mentionedAttr.get(mentionedAttr.size() - 3).trim();
+        	if(!previous3Attr.equals(WeatherAction.TOKEN_END)&&MR.getAttrFieldValue().containsKey(previous3Attr)){
+        		for(String field: MR.getAttrFieldValue().get(previous3Attr).keySet()){
+        			if(field.contains("time")){
+        				prev3TimeValue  = MR.getAttrFieldValue().get(previous3Attr).get(field);
+        			}
+        		}
+        	}
+        }
+        String previous4Attr = "@@";
+        String prev4TimeValue = "";
+        if (mentionedAttr.size() - 4 >= 0) {
+        	previous4Attr = mentionedAttr.get(mentionedAttr.size() - 4).trim();
+        	if(!previous4Attr.equals(WeatherAction.TOKEN_END)&&MR.getAttrFieldValue().containsKey(previous4Attr)){
+        		for(String field : MR.getAttrFieldValue().get(previous4Attr).keySet()){
+        			if(field.contains("time")){
+        				prev4TimeValue = MR.getAttrFieldValue().get(previous4Attr).get(field);
+        			}
+        		}
+        	}
+        }
+        String previous5Attr = "@@";
+        String prev5TimeValue = "";
+        if (mentionedAttr.size() - 5 >= 0) {
+        	previous5Attr = mentionedAttr.get(mentionedAttr.size() - 5).trim();
+        	if(!previous5Attr.equals(WeatherAction.TOKEN_END)&&MR.getAttrFieldValue().containsKey(previous5Attr)){
+        		for(String field : MR.getAttrFieldValue().get(previous5Attr).keySet()){
+        			if(field.contains("time")){
+        				prev5TimeValue = MR.getAttrFieldValue().get(previous5Attr).get(field);
+        			}
+        		}
+        	}
+        }
+        String previousBigramAttr = previous2Attr + "|" + previousAttr;
+        String previousTrigramAttr = previous3Attr + "|" + previous2Attr + "|" + previousAttr;
+        String previous4gramAttr = previous4Attr + "|" + previous3Attr + "|" + previous2Attr + "|" + previousAttr;
+        String previous5gramAttr = previous5Attr + "|" + previous4Attr + "|" + previous3Attr + "|" + previous2Attr + "|" + previousAttr;
+        generalFeatures.put("feature_attr_bigram_" + previousBigramAttr, 1.0);
+        generalFeatures.put("feature_attr_trigram_" + previousTrigramAttr, 1.0);
+        generalFeatures.put("feature_attr_4gram_" + previous4gramAttr, 1.0);
+        generalFeatures.put("feature_attr_5gram_" + previous5gramAttr, 1.0);
+        
+        //If arguments have been generated or not
+        for (int i = 0; i < mentionedAttr.size(); i++) {
+            generalFeatures.put("feature_attr_allreadyMentioned_" + mentionedAttr.get(i), 1.0);
+        }
+        //If arguments should still be generated or not
+        attrsToBeMentioned.forEach((attr) -> {
+            generalFeatures.put("feature_attr_toBeMentioned_" + attr, 1.0);
+        }); 
+        //Which attrs are in the MR and which are not
+        
+        availableAttr.forEach((attribute) -> {
+            if (MR.getAttrFieldValue().keySet().contains(attribute)) {
+                generalFeatures.put("feature_attr_inMR_" + attribute, 1.0);
+            } else {
+                generalFeatures.put("feature_attr_notInMR_" + attribute, 1.0);
+            }
+        });
+        //HashSet<String> attrsToBeMentioned = new HashSet<>();
+        /*
+        attrsToBeMentioned.stream().forEach((attr)->{
+        	String attr = attrFieldValue.split("=")[0];
+        	attrsToBeMentioned.add(attr);
+        });*/
+        //just attribute
+        /*
+        ArrayList<String> mentionedAttrs = new ArrayList<>();
+        for(int i=0; i< mentionedAttrFieldValues.size();i++){
+        	String attr = mentionedAttrFieldValues.get(i).split("=")[0];
+        	mentionedAttrs.add(attr);
+        }
+        HashSet<String> attrsToBeMentioned = new HashSet<>();
+        attrFieldValuesToBeMentioned.stream().forEach((attrFieldValue)->{
+        	String attr = attrFieldValue.split("=")[0];
+        	attrsToBeMentioned.add(attr);
+        });
+        for (int j = 1; j <= 1; j++) {
+            String previousAttr = "";
+            if (mentionedAttrs.size() - j >= 0) {
+                previousAttr = mentionedAttrs.get(mentionedAttrs.size() - j).trim();
+            }
+            if (!previousAttr.isEmpty()) {
+                generalFeatures.put("feature_attr_" + j + "_" + previousAttr, 1.0);
+            } else {
+                generalFeatures.put("feature_attr_" + j + "_@@", 1.0);
+            }
+        }
+        //Word N-Grams
+        String prevAttr = "@@";
+        if (mentionedAttrs.size() - 1 >= 0) {
+            prevAttr = mentionedAttrs.get(mentionedAttrs.size() - 1).trim();
+        }
+        String prev2Attr = "@@";
+        if (mentionedAttrs.size() - 2 >= 0) {
+            prev2Attr = mentionedAttrs.get(mentionedAttrs.size() - 2).trim();
+        }
+        String prev3Attr = "@@";
+        if (mentionedAttrs.size() - 3 >= 0) {
+            prev3Attr = mentionedAttrs.get(mentionedAttrs.size() - 3).trim();
+        }
+        String prev4Attr = "@@";
+        if (mentionedAttrs.size() - 4 >= 0) {
+            prev4Attr = mentionedAttrs.get(mentionedAttrs.size() - 4).trim();
+        }
+        String prev5Attr = "@@";
+        if (mentionedAttrs.size() - 5 >= 0) {
+            prev5Attr = mentionedAttrs.get(mentionedAttrs.size() - 5).trim();
+        }
+        String prevBigramAttr = prev2Attr + "|" + prevAttr;
+        String prevTrigramAttr = prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        String prev4gramAttr = prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        String prev5gramAttr = prev5Attr + "|" + prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        generalFeatures.put("feature_attr_bigram_" + prevBigramAttr, 1.0);
+        generalFeatures.put("feature_attr_trigram_" + prevTrigramAttr, 1.0);
+        generalFeatures.put("feature_attr_4gram_" + prev4gramAttr, 1.0);
+        generalFeatures.put("feature_attr_5gram_" + prev5gramAttr, 1.0);
+        //If arguments have been generated or not
+        mentionedAttrs.forEach((attr) -> {
+            generalFeatures.put("feature_attr_alreadyMentioned_" + attr, 1.0);
+        });
+        //If arguments should still be generated or not
+        attrsToBeMentioned.forEach((attr) -> {
+            generalFeatures.put("feature_attr_toBeMentioned_" + attr, 1.0);
+        });*/
+        //value specific features
+        for(String attribute : availableAttr){
+        	if(attribute.equals(WeatherAction.TOKEN_END)){
+        		// check if attribute not mentioned when going to end, at the end of attribute action sequence
+        		if (attrsToBeMentioned.isEmpty()) {
+                    valueSpecificFeatures.get(attribute).put("global_feature_specific_allAttrsMentioned", 1.0);
+                } else {
+                    valueSpecificFeatures.get(attribute).put("global_feature_specific_allAttrsNotMentioned", 1.0);
+                }
+        		
+        	}else{
+        		
+        		//Is attr in MR?
+        		if (MR.getAttrFieldValue().get(attribute) != null) {
+                    valueSpecificFeatures.get(attribute).put("global_feature_specific_isInMR", 1.0);
+                    String currentTimeValue = "";
+                    for(String field: MR.getAttrFieldValue().get(attribute).keySet()){
+                    	if(field.contains("time")){
+                    		currentTimeValue = MR.getAttrFieldValue().get(attribute).get(field);
+                    		
+                    	}
+                    }
+                    if(!currentTimeValue.isEmpty()&&!prevTimeValue.isEmpty()){
+                    	if(currentTimeValue.equals(prevTimeValue)){
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_equal_to_prev1TimeValue", 1.0);
+                    	}
+                    	else{
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_Not_equal_to_prev1TimeValue", 1.0);
+                    	}
+                    }
+                    if(!currentTimeValue.isEmpty()&&!prev2TimeValue.isEmpty()){
+                    	if(currentTimeValue.equals(prev2TimeValue)){
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_equal_to_prev2TimeValue", 1.0);
+                    	}
+                    	else{
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_Not_equal_to_prev2TimeValue", 1.0);
+                    	}
+                    }
+                    if(!currentTimeValue.isEmpty()&&!prev3TimeValue.isEmpty()){
+                    	if(currentTimeValue.equals(prev3TimeValue)){
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_equal_to_prev3TimeValue", 1.0);
+                    	}
+                    	else{
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_Not_equal_to_prev3TimeValue", 1.0);
+                    	}
+                    }
+                    if(!currentTimeValue.isEmpty()&&!prev4TimeValue.isEmpty()){
+                    	if(currentTimeValue.equals(prev4TimeValue)){
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_equal_to_prev4TimeValue", 1.0);
+                    	}
+                    	else{
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_Not_equal_to_prev4TimeValue", 1.0);
+                    	}
+                    }
+                    if(!currentTimeValue.isEmpty()&&!prev5TimeValue.isEmpty()){
+                    	if(currentTimeValue.equals(prev5TimeValue)){
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_equal_to_prev5TimeValue", 1.0);
+                    	}
+                    	else{
+                    		valueSpecificFeatures.get(attribute).put("global_feature_specific_Not_equal_to_prev5TimeValue", 1.0);
+                    	}
+                    }
+                } else {
+                    valueSpecificFeatures.get(attribute).put("global_feature_specific_isNotInMR", 1.0);
+                }
+        		String prevAttr = "@@";
+                if (mentionedAttr.size() - 1 >= 0) {
+                    prevAttr = mentionedAttr.get(mentionedAttr.size() - 1).trim();
+                }
+        		//Is attr already mentioned right before
+                if (prevAttr.equals(attribute)) {
+                    valueSpecificFeatures.get(attribute).put("global_feature_specific_attrFollowingSameAttr", 1.0);
+                } else {
+                    valueSpecificFeatures.get(attribute).put("global_feature_specific_attrNotFollowingSameAttr", 1.0);
+                }
+                //Is attr already mentioned
+                attrsAlreadyMentioned.stream().forEach((attr) -> {
+                    if(attribute.equals(attr)){
+                    	valueSpecificFeatures.get(attribute).put("global_feature_specific_attrAlreadyMentioned", 1.0);
+                    }
 
+                });
+        	
+                //Is attr to be mentioned (has value to express)
+                boolean toBeMentioned = false;
+                for(String attr :attrsToBeMentioned ){
+                	if(attribute.equals(attr)){
+                		toBeMentioned = true;
+                        valueSpecificFeatures.get(attribute).put("global_feature_specific_attrToBeMentioned", 1.0);
+                	}
+                }
+                if(!toBeMentioned){
+                	valueSpecificFeatures.get(attribute).put("global_feature_specific_attrNotToBeMentioned", 1.0);
+                }
+        	}
+        	HashSet<String> keys = new HashSet<>(valueSpecificFeatures.get(attribute).keySet());
+            keys.forEach((feature1) -> {
+                keys.stream().filter((feature2) -> (valueSpecificFeatures.get(attribute).get(feature1) == 1.0
+                        && valueSpecificFeatures.get(attribute).get(feature2) == 1.0
+                        && feature1.compareTo(feature2) < 0)).forEachOrdered((feature2) -> {
+                    valueSpecificFeatures.get(attribute).put(feature1 + "&&" + feature2, 1.0);
+                });
+            });
+            ArrayList<String> fullGramLM = new ArrayList<>();
+            for(int i=0;i<mentionedAttr.size();i++){
+            	fullGramLM.add(0,mentionedAttr.get(i));
+            	
+            }
+            ArrayList<String> prev5attrGramLM = new ArrayList<>();
+            int j=0;
+            for (int i = mentionedAttr.size() - 1; (i >= 0 && j < 5); i--) {
+                prev5attrGramLM.add(0, mentionedAttr.get(i));
+                j++;
+            }
+            while (prev5attrGramLM.size() < 4) {
+                prev5attrGramLM.add(0, "@@");
+            }
+            double afterLMScore = attrLMs.getProbability(fullGramLM);
+            valueSpecificFeatures.get(attribute).put("global_feature_LMAttrFull_score", afterLMScore);
+            afterLMScore = attrLMs.getProbability(prev5attrGramLM);
+            valueSpecificFeatures.get(attribute).put("global_feature_LMAttr_score", afterLMScore);
+        }
+        return new Instance(generalFeatures, valueSpecificFeatures, costs);
+	}
+	
+	public Instance createFieldInstance(String bestAction,ArrayList<String> previousGeneratedAttributes
+			,ArrayList<String> previousGeneratedFields,ArrayList<String> nextGeneratedAttributes,HashSet<String> attrFieldValuesAlreadyMentioned
+			,HashSet<String> attrFieldValuesThatFollow,HashMap<String,HashSet<String>> availableFieldPerAttr
+			,WeatherMeaningRepresentation MR){
+		TObjectDoubleHashMap<String> costs = new TObjectDoubleHashMap<>();
+		if (!bestAction.isEmpty()) {
+			if(bestAction.contains("=")){
+				String attr = bestAction.split("=")[0];
+				String field = bestAction;
+				for(String action :availableFieldPerAttr.get(attr) ){
+					if(action.equalsIgnoreCase(field)){
+						costs.put(action, 0.0);
+					}
+					else{
+						costs.put(action, 1.0);
+					}
+					
+				}
+				if(field.equals(WeatherAction.TOKEN_END)){
+					costs.put(WeatherAction.TOKEN_END, 0.0);
+				}else{
+					costs.put(WeatherAction.TOKEN_END, 1.0);
+				}
+			}
+			
+		}
+		return createFieldInstanceWithCosts(bestAction,costs,previousGeneratedAttributes,previousGeneratedFields
+				,nextGeneratedAttributes,attrFieldValuesAlreadyMentioned,attrFieldValuesThatFollow
+				,availableFieldPerAttr,MR);
+		
+	}
+	public Instance createFieldInstanceWithCosts(String currentAttrField,TObjectDoubleHashMap<String> costs,ArrayList<String> previousGeneratedAttributes
+			,ArrayList<String> previousGeneratedFields,ArrayList<String> nextGeneratedAttributes,HashSet<String> attrFieldValuesAlreadyMentioned
+			,HashSet<String> attrFieldValuesThatFollow,HashMap<String,HashSet<String>> availableFieldPerAttr
+			,WeatherMeaningRepresentation MR){
+		
+		TObjectDoubleHashMap<String> generalFeatures = new TObjectDoubleHashMap<>();
+        HashMap<String, TObjectDoubleHashMap<String>> valueSpecificFeatures = new HashMap<>();
+        String currentAttr = currentAttrField.split("=")[0];
+        //String currentField  = currentAttrField;
+        for(String action : availableFieldPerAttr.get(currentAttr)){
+        	valueSpecificFeatures.put(action, new TObjectDoubleHashMap<String>());
+        }
+        ArrayList<String> generatedFields = new ArrayList<>();
+        ArrayList<String> generatedFieldsInSameAttr = new ArrayList<>();
+        String previousField = "";
+        String previousAttr  = "";
+        for(int w = 0;w<previousGeneratedFields.size();w++){
+        	String field = previousGeneratedFields.get(w);
+        	String attr ="";
+        	if(!field.equals(WeatherAction.TOKEN_END)&&
+        			!field.equals(WeatherAction.TOKEN_START)){
+        	
+        		//field = previousGeneratedFields.get(w).split("=")[0]
+        			//+"="+previousGeneratedFields.get(w).split("=")[1];
+        		attr = previousGeneratedFields.get(w).split("=")[0];
+        		if(!attr.equals(previousAttr)){
+        			previousAttr = attr;
+        		}
+        	}
+        	else{
+        		attr = previousAttr;
+        	}
+        	if(!previousField.equals(field)){
+        		previousField = field;
+        		generatedFields.add(field);
+        	}
+        	if(attr.equals(currentAttr)){
+        		generatedFieldsInSameAttr.add(field);
+        	}
+        		
+        		
+        	
+        	
+        }
+        
+        //generatedFields in same attribute
+        previousField = "@@";
+        String previousFieldValue = "";
+        if(generatedFieldsInSameAttr.size()-1>=0){
+        	previousField = generatedFieldsInSameAttr.get(generatedFieldsInSameAttr.size()-1);
+        	if(!previousField.equals(WeatherAction.TOKEN_END)
+        			&&!previousField.equals(WeatherAction.TOKEN_START)
+        			&&!previousField.equals("@@")){
+        		String prevAttr = previousField.split("=")[0];
+        		String prevField = previousField.split("=")[1];
+        		if(MR.getAttrFieldValue().containsKey(prevAttr)){
+        			String prevValue = MR.getAttrFieldValue().get(prevAttr).get(prevField);
+        			previousFieldValue = previousField+"="+prevValue;
+        		}
+        	}
+        }
+        generalFeatures.put("feature_field_inSameAttr_"+previousField, 1.0);
+        if(!previousFieldValue.isEmpty()){
+        	generalFeatures.put("feature_fieldValue_inSameAttr_"+previousFieldValue, 1.0);
+        }
+        
+        String previous2Field = "@@";
+        String previous2FieldValue = "";
+        if(generatedFieldsInSameAttr.size()-2>=0){
+        	previous2Field = generatedFieldsInSameAttr.get(generatedFieldsInSameAttr.size()-2);
+        	if(!previous2Field.equals(WeatherAction.TOKEN_END)
+        			&&!previous2Field.equals(WeatherAction.TOKEN_START)
+        			&&!previous2Field.equals("@@")){
+        		String prev2Attr = previous2Field.split("=")[0];
+        		String prev2field = previous2Field.split("=")[1];
+        		if(MR.getAttrFieldValue().containsKey(prev2Attr)){
+        			String prev2Value = MR.getAttrFieldValue().get(prev2Attr).get(prev2field);
+        			previous2FieldValue = previous2Field+"="+prev2Value;
+        		}
+        		
+        	}
+        }
+        generalFeatures.put("feature_prev2field_inSameAttr_"+previousField+"|"+previous2Field, 1.0);
+        if(!previous2FieldValue.isEmpty()&&!previousFieldValue.isEmpty()){
+        	generalFeatures.put("feature_prev2fieldValue_inSameAttr_"+previousFieldValue+"|"+previous2FieldValue, 1.0);
+        }
+        if(!previous2FieldValue.isEmpty()){
+        	generalFeatures.put("feature_prev2SinglefieldValue_inSameAttr_"+previous2FieldValue, 1.0);
+        }
+        
+        String previous3Field = "@@";
+        String previous3FieldValue = "";
+        if(generatedFieldsInSameAttr.size()-3>=0){
+        	previous3Field = generatedFieldsInSameAttr.get(generatedFieldsInSameAttr.size()-3);
+        	if(!previous3Field.equals(WeatherAction.TOKEN_END)
+        			&&!previous3Field.equals(WeatherAction.TOKEN_START)
+        			&&!previous3Field.equals("@@")){
+        		String prev3Attr = previous3Field.split("=")[0];
+        		String prev3field = previous3Field.split("=")[1];
+        		if(MR.getAttrFieldValue().containsKey(prev3Attr)){
+        			String prev3Value = MR.getAttrFieldValue().get(prev3Attr).get(prev3field);
+        			previous3FieldValue = previous3Field+"="+prev3Value;
+        		}
+        		
+        	}
+        }       		
+        generalFeatures.put("feature_prev3field_inSameAttr_"+previous3Field+"|"+previousField+"|"+previous2Field, 1.0);
+        if(!previous3FieldValue.isEmpty()&&!previousFieldValue.isEmpty()&&!previous3FieldValue.isEmpty()){
+        	generalFeatures.put("feature_prev3fieldValue_inSameAttr_"+previous3FieldValue+"|"+previousFieldValue+"|"+previous3FieldValue, 1.0);
+        }
+        if(!previous3FieldValue.isEmpty()){
+        	generalFeatures.put("feature_prev3SinglefieldValue_inSameAttr_"+previous3FieldValue, 1.0);
+        }
+     // generated all fields
+        previousField = "@@";
+        previousFieldValue = "";
+        if(generatedFields.size()-1>=0){
+        	previousField = generatedFields.get(generatedFields.size()-1);
+        	if(!previousField.equals(WeatherAction.TOKEN_END)
+        			&&!previousField.equals(WeatherAction.TOKEN_START)
+        			&&!previousField.equals("@@")){
+        		String prevAttr = previousField.split("=")[0];
+        		String prevField = previousField.split("=")[1];
+        		if(MR.getAttrFieldValue().containsKey(prevAttr)){
+        			String prevValue = MR.getAttrFieldValue().get(prevAttr).get(prevField);
+        			previousFieldValue = previousField+"="+prevValue;
+        		}
+        		
+        	}
+        }
+        generalFeatures.put("feature_field_prevInAll_"+previousField, 1.0);
+        if(!previousFieldValue.isEmpty()){
+        	generalFeatures.put("featuer_fieldValue_prevInAll"+previousFieldValue, 1.0);
+        }
+        previous2Field = "@@";
+        previous2FieldValue = "";
+        if(generatedFields.size()-2>=0){
+        	previous2Field = generatedFields.get(generatedFields.size()-2);
+        	if(!previous2Field.equals(WeatherAction.TOKEN_END)
+        			&&!previous2Field.equals(WeatherAction.TOKEN_START)
+        			&&!previous2Field.equals("@@")){
+        		String prev2Attr = previous2Field.split("=")[0];
+        		String prev2Field = previous2Field.split("=")[1];
+        		if(MR.getAttrFieldValue().containsKey(prev2Attr)){
+        			String prev2Value = MR.getAttrFieldValue().get(prev2Attr).get(prev2Field);
+        			previous2FieldValue = previous2Field+"="+prev2Value;
+        		}
+        		
+        	}
+        }
+        generalFeatures.put("feature_field_prev2InAll_"+previousField+"|"+previous2Field, 1.0);
+        if(!previous2FieldValue.isEmpty()&&!previousFieldValue.isEmpty()){
+        	generalFeatures.put("featuer_fieldValue_prev2InAll"+previousFieldValue+"|"+previous2FieldValue, 1.0);
+        }
+        if(!previous2FieldValue.isEmpty()){
+        	generalFeatures.put("feature_fieldValue_prev2SingleInAll"+previous2FieldValue, 1.0);
+        }
+        previous3Field = "@@";
+        previous3FieldValue = "";
+        if(generatedFields.size()-3>=0){
+        	previous3Field = generatedFields.get(generatedFields.size()-3);
+        	if(!previous3Field.equals(WeatherAction.TOKEN_END)
+        			&&!previous3Field.equals(WeatherAction.TOKEN_START)
+        			&&!previous3Field.equals("@@")){
+        		String prev3Attr = previous3Field.split("=")[0];
+        		String prev3Field = previous3Field.split("=")[1];
+        		if(MR.getAttrFieldValue().containsKey(prev3Attr)){
+        			String prev3Value = MR.getAttrFieldValue().get(prev3Attr).get(prev3Field);
+        			previous3FieldValue = previous3Field+"="+prev3Value;
+        		}
+        		
+        	}
+        }
+        generalFeatures.put("feature_field_prev3InAll_"+previousField+"|"+previous2Field+"|"+previous3Field, 1.0);
+        if(!previous3FieldValue.isEmpty()&&!previous2FieldValue.isEmpty()&&!previousFieldValue.isEmpty()){
+        	generalFeatures.put("featuer_fieldValue_prev3InAll"+previousFieldValue+"|"+previous2FieldValue+"|"+previous3FieldValue, 1.0);
+        }
+        if(!previous3FieldValue.isEmpty()){
+        	generalFeatures.put("feature_fieldValue_prev3SingleInAll"+previous3FieldValue, 1.0);
+        }
+        String previous4Field = "@@";
+        String previous4FieldValue = "";
+        if(generatedFields.size()-4>=0){
+        	previous4Field = generatedFields.get(generatedFields.size()-4);
+        	if(!previous4Field.equals(WeatherAction.TOKEN_END)
+        			&&!previous4Field.equals(WeatherAction.TOKEN_START)
+        			&&!previous4Field.equals("@@")){
+        		String prev4Attr = previous4Field.split("=")[0];
+        		String prev4Field = previous4Field.split("=")[1];
+        		if(MR.getAttrFieldValue().containsKey(prev4Attr)){
+        			String prev4Value = MR.getAttrFieldValue().get(prev4Attr).get(prev4Field);
+        			previous4FieldValue = previous4Field+"="+prev4Value;
+        		}
+        		
+        	}
+        }
+        generalFeatures.put("feature_field_prev4InAll_"+previousField+"|"+previous2Field+"|"+previous3Field+"|"+previous4Field, 1.0);
+        if(!previous4FieldValue.isEmpty()&&!previous3FieldValue.isEmpty()&&!previous2FieldValue.isEmpty()&&!previousFieldValue.isEmpty()){
+        	generalFeatures.put("featuer_fieldValue_prev4InAll"+previousFieldValue+"|"+previous2FieldValue+"|"+previous3FieldValue+"|"+previous4FieldValue, 1.0);
+        }
+        if(!previous4FieldValue.isEmpty()){
+        	generalFeatures.put("feature_fieldValue_prev4SingleInAll"+previous4FieldValue, 1.0);
+        }
+        String previous5Field = "@@";
+        String previous5FieldValue = "";
+        if(generatedFields.size()-5>=0){
+        	previous5Field = generatedFields.get(generatedFields.size()-5);
+        	if(!previous5Field.equals(WeatherAction.TOKEN_END)
+        			&&!previous5Field.equals(WeatherAction.TOKEN_START)
+        			&&!previous5Field.equals("@@")){
+        		String prev5Attr = previous5Field.split("=")[0];
+        		String prev5Field = previous5Field.split("=")[1];
+        		if(MR.getAttrFieldValue().containsKey(prev5Attr)){
+        			String prev5Value = MR.getAttrFieldValue().get(prev5Attr).get(prev5Field);
+        			previous5FieldValue = previous5Field+"="+prev5Value;
+        		}
+        		
+        	}
+        }
+        generalFeatures.put("feature_field_prev5InAll_"+previousField+"|"+previous2Field+"|"+previous3Field+"|"+previous4Field+"|"+previous5Field, 1.0);
+        if(!previous5FieldValue.isEmpty()&&!previous4FieldValue.isEmpty()&&!previous3FieldValue.isEmpty()&&!previous2FieldValue.isEmpty()&&!previousFieldValue.isEmpty()){
+        	generalFeatures.put("featuer_fieldValue_prev5InAll"+previousFieldValue+"|"+previous2FieldValue+"|"+previous3FieldValue+"|"
+        +previous4FieldValue+"|"+previous5FieldValue, 1.0);
+        }
+        if(!previous5FieldValue.isEmpty()){
+        	generalFeatures.put("feature_fieldValue_prev5SingleInAll"+previous5FieldValue, 1.0);
+        }
+        // attribute field to be mentioned
+        attrFieldValuesThatFollow.stream().forEach((attrField)->{
+        	generalFeatures.put("feature_attrField_TBMentioned"+attrField, 1.0);
+        });
+        //attribute field already mentioned
+        attrFieldValuesThatFollow.stream().forEach((attrField)->{
+        	generalFeatures.put("feature_attrField_alreadyMentioned"+attrField, 1.0);
+        });
+        //generated attribute
+        previousGeneratedAttributes.stream().forEach((attr)->{
+        	generalFeatures.put("feature_attr_areadyMentioned"+attr,1.0 );
+        });
+        //next generated attribute
+        previousGeneratedAttributes.stream().forEach((attr)->{
+        	generalFeatures.put("feature_attr_TBMentioned"+attr,1.0);
+        });
+        for(String action:availableFieldPerAttr.get(currentAttr) ){
+        	if(action.contains("=")){
+        		String attr = action.split("=")[0];
+        		if(MR.getAttrFieldValue().containsKey(attr)){
+        			generalFeatures.put("feature_attrField_inMR"+action,1.0 );
+        		}
+        	}
+        }
+        for(String action: availableFieldPerAttr.get(currentAttr)){
+        	if(action.equals(WeatherAction.TOKEN_END)){
+        		if(attrFieldValuesAlreadyMentioned.isEmpty()){
+        			valueSpecificFeatures.get(action).put("feature_valueSpecific_attrFieldValues_allMentioned", 1.0);
+        		}
+        		else{
+        			valueSpecificFeatures.get(action).put("feature_valueSpecific_attrFieldValues_notAllMentioned", 1.0);
+        		}
+        	}else{
+        		if(action.contains("=")){
+        			String attr = action.split("=")[0];
+        			if(MR.getAttrFieldValue().containsKey(attr)){
+        				valueSpecificFeatures.get(action).put("feature_valueSpecific_inMR", 1.0);
+        			}else{
+        				valueSpecificFeatures.get(action).put("feature_valueSpecific_notInMR", 1.0);
+        			}
+        		}
+        		if(action.equals(previousField)){
+        			valueSpecificFeatures.get(action).put("feature_valueSpecific_equalPrevious1", 1.0);
+        		}
+        		if(action.equals(previous2Field)){
+        			valueSpecificFeatures.get(action).put("feature_valueSpecific_equalPrevious2", 1.0);
+        		}
+        		if(attrFieldValuesThatFollow.contains(action)){
+        			valueSpecificFeatures.get(action).put("feature_valueSpecific_toBeMentioned",1.0);
+        		}
+        		else{
+        			valueSpecificFeatures.get(action).put("feature_valueSpecific_notToBeMentioned",1.0);
+        		}
+        	}
+        	double score = fieldLMs.getProbability(generatedFields);
+        	valueSpecificFeatures.get(action).put("feature_valueSpecific_fullGramLM", score);
+        	score  = fieldLMs.getProbability(generatedFieldsInSameAttr);
+        	valueSpecificFeatures.get(action).put("feature_valueSpecific_5GramLM", score);
+        }
+        
+        
+        
+        
+        
+        return new Instance(generalFeatures, valueSpecificFeatures, costs);
+	}
+	
+	
+	
+	
+	
+	public Object[] inferFeatureAndCostVectors() {
+
+		ConcurrentHashMap<WeatherDatasetInstance,ArrayList<Instance>> attributeTrainingData = new ConcurrentHashMap<>();
+		ConcurrentHashMap<WeatherDatasetInstance, HashMap<String,ArrayList<Instance>>> fieldTrainingData = new ConcurrentHashMap<>();
+		ConcurrentHashMap<WeatherDatasetInstance, HashMap<String,HashMap<String,ArrayList<Instance>>>> wordTrainingData  = new ConcurrentHashMap<>();
+		if(!availableWordAction.isEmpty()){
+			trainingData.stream().forEach((di)->{
+				attributeTrainingData.put(di, new ArrayList<>());
+				fieldTrainingData.put(di, new HashMap<>());
+				wordTrainingData.put(di, new HashMap<>());
+				for(String attr: attributes){
+					fieldTrainingData.get(di).put(attr, new ArrayList<>());
+					wordTrainingData.get(di).put(attr, new HashMap<>());
+					for(String field : attributeFields.get(attr)){
+						wordTrainingData.get(di).get(attr).put(field, new ArrayList<>());
+					}
+					
+				}
+				
+				
+			});
+		}
+		
+		Object[] results = new Object[2];
+		return results;
+	}
+	
+	
+	
+	
+	public ArrayList<Instance> getAttributeTrainingData() {
+		return attributeTrainingData;
+	}
+	public void setAttributeTrainingData(ArrayList<Instance> attributeTrainingData) {
+		this.attributeTrainingData = attributeTrainingData;
+	}
+	public HashMap<String,ArrayList<Instance>> getFieldTrainingData() {
+		return fieldTrainingData;
+	}
+	public void setFieldTrainingData(HashMap<String,ArrayList<Instance>> fieldTrainingData) {
+		this.fieldTrainingData = fieldTrainingData;
+	}
+	public HashMap<String,HashMap<String,ArrayList<Instance>>> getWordTrainingData() {
+		return wordTrainingData;
+	}
+	public void setWordTrainingData(HashMap<String,HashMap<String,ArrayList<Instance>>> wordTrainingData) {
+		this.wordTrainingData = wordTrainingData;
+	}
+
+
+
+}
+class InferWeatherVectorsThread extends Thread{
+	WeatherDatasetInstance di;
+	WeatherGov  wg;
+	ConcurrentHashMap<WeatherDatasetInstance,ArrayList<Instance>> attributeTrainingData;
+	ConcurrentHashMap<WeatherDatasetInstance, HashMap<String,ArrayList<Instance>>> fieldTrainingData;
+	ConcurrentHashMap<WeatherDatasetInstance, HashMap<String,HashMap<String,ArrayList<Instance>>>> wordTrainingData;
+	
+	InferWeatherVectorsThread(WeatherDatasetInstance di,WeatherGov wg
+			,ConcurrentHashMap<WeatherDatasetInstance,ArrayList<Instance>> attributeTrainingData
+			,ConcurrentHashMap<WeatherDatasetInstance, HashMap<String,ArrayList<Instance>>> fieldTrainingData
+			,ConcurrentHashMap<WeatherDatasetInstance, HashMap<String,HashMap<String,ArrayList<Instance>>>> wordTrainingData){
+		this.di = di;
+		this.wg = wg;
+		this.attributeTrainingData = attributeTrainingData;
+		this.fieldTrainingData = fieldTrainingData;
+		this.wordTrainingData = wordTrainingData;
+		
+	}
+	/**
+     * This method goes through the ActionSequence one time-step at the time, and creates a feature and cost vector for each one.
+     * Meanwhile it tracks the context information that the feature vector requires.
+     */
+	@Override
+	public void run(){
+		ArrayList<WeatherAction> refSequence = di.getDirectReferenceSequence();
+		//Collections to track which attribute/field/value pairs have already be mentioned in the sequence and which are yet to be mentioned
+		HashSet<String> attrFieldValuesToBeMentioned = new HashSet<>();
+		HashSet<String> attrFieldValuesAlreadyMentioned = new HashSet<>();
+		for(String attribute :di.getMR().getAttrFieldValue().keySet()){
+			
+				attrFieldValuesToBeMentioned.add(attribute);
+			
+		}
+		// First we create the feature and cost vectors for the content actions
+        ArrayList<String> attributeSequence = new ArrayList<>();
+        String previousAttr = "";
+        for(int w = 0;w<refSequence.size();w++){
+        	if(!refSequence.get(w).getAttribute().equals(WeatherAction.TOKEN_PUNCT)
+        			){
+        		String currentAttr =refSequence.get(w).getAttribute(); 
+        		if(refSequence.get(w).getAttribute().contains("=")){
+        			currentAttr = refSequence.get(w).getAttribute().split("=")[0];
+        		}
+        		if(!currentAttr.equals(previousAttr)){
+        			if(!currentAttr.isEmpty()){
+            			attrFieldValuesToBeMentioned.remove(currentAttr);
+            		}
+
+            		Instance attributeTraininigVector = wg.createAttributeInstance(currentAttr, 
+            				attributeSequence, attrFieldValuesAlreadyMentioned, attrFieldValuesToBeMentioned,
+            				di.getMR(), wg.availableAttr);
+            		if(attributeTraininigVector!=null){
+            			attributeTrainingData.get(di).add(attributeTraininigVector);
+            			
+            		}
+            		attributeSequence.add(currentAttr);
+            		if(!currentAttr.isEmpty()){
+            			attrFieldValuesToBeMentioned.remove(currentAttr);
+            			attrFieldValuesAlreadyMentioned.add(currentAttr);
+            		}
+        		}
+        		
+        		
+        		
+        		
+        		
+        		
+        		
+        		
+        	}	
+        	
+        }
+        //Reset the tracking collections
+        attrFieldValuesToBeMentioned = new HashSet<>();
+		attrFieldValuesAlreadyMentioned = new HashSet<>();
+		for(String attribute :di.getMR().getAttrFieldValue().keySet()){
+			for(String field :di.getMR().getAttrFieldValue().get(attribute).keySet()){
+				
+				attrFieldValuesToBeMentioned.add(attribute+"="+field);
+			}
+		}
+		
+		// Then we create the feature and cost vectors for the field actions
+        // Each field action corresponds to a attribute action, so we need to keep track of which attribute action we are "generating" from at each timestep
+		
+		//the sequence of already generated attrFieldValue pairs
+		ArrayList<String> attrs = new ArrayList<>();
+        
+        
+        // current attribute
+        String attribute = "";
+        String fieldTBMentioned = "";
+        
+        // Time-step counter
+        int a = -1;
+        // This tracks the subphrase consisting of the fields generated for the current attribute action
+        ArrayList<String> fieldSequence = new ArrayList<>();
+        // For every step of the sequence
+        for (int w = 0; w < refSequence.size(); w++) {
+        	if(!refSequence.get(w).getAttribute().equals(WeatherAction.TOKEN_PUNCT)){
+        		// If this action does not belong to the current attribute, we need to update the trackers and switch to the new attribute action
+        		// if current attribute is changed, we need to update
+        		String currentAttr = refSequence.get(w).getAttribute();
+        		if(refSequence.get(w).getAttribute().contains("=")){
+        			currentAttr = refSequence.get(w).getAttribute().split("=")[0];
+        		}
+        		if(!currentAttr.equals(attribute)){
+        			a++;
+        			currentAttr = attribute;
+        			
+        			attrs.add(attribute);
+        			
+        			
+        		}
+        		String currentField = refSequence.get(w).getField();
+        		if(refSequence.get(w).getField().contains("=")){
+        			currentField = refSequence.get(w).getField().split("=")[0]+"="+refSequence.get(w).getField().split("=")[1];
+        		}
+        		if(!currentField.equals(fieldTBMentioned)){
+        			fieldTBMentioned = currentField;
+        			// The subsequence of attrFieldValue pairs we have generated for so far
+                    ArrayList<String> predictedAttributesForInstance = new ArrayList<>();
+                    for (int i = 0; i < attrs.size(); i++) {
+                        predictedAttributesForInstance.add(attrs.get(i));
+                    }
+                    ArrayList<String> nextAttributesForInstance = new ArrayList<>();
+                    // Create the feature and cost vector
+                    for(int k = a+1;k<attributeSequence.size();k++){
+                    	nextAttributesForInstance.add(attributeSequence.get(k));
+                    }
+                    Instance fieldTrainingVector = wg.createFieldInstance(fieldTBMentioned, predictedAttributesForInstance
+                    		, fieldSequence, nextAttributesForInstance, attrFieldValuesAlreadyMentioned
+                    		, attrFieldValuesToBeMentioned, wg.availableFieldPerAttr, di.getMR());
+                    if(fieldTrainingVector!=null){
+                    	fieldTrainingData.get(di).get(currentAttr).add(fieldTrainingVector);
+                    }
+                    if(!fieldTBMentioned.isEmpty()){
+                    	attrFieldValuesAlreadyMentioned.add(fieldTBMentioned);
+                    	attrFieldValuesToBeMentioned.remove(fieldTBMentioned);
+                    }
+                    fieldSequence.add(currentField);
+                    
+        		}
+        		
+        		
+            		
+            	
+            	
+        	}
+        	
+        	
+        }
+        
+        
+		
+		
+		
+		
+		
+	}
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 }
