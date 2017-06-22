@@ -1,0 +1,2561 @@
+package structuredPredictionNLG;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import gnu.trove.map.hash.TObjectDoubleHashMap;
+import jarow.Instance;
+import jarow.JAROW;
+import similarity_measures.Levenshtein;
+import simpleLM.SimpleLM;
+
+public class E2E extends DatasetParser {
+	final String singlePredicate = "#PREDICATE";
+
+	public E2E(String[] args) {
+		super(args);
+		
+	}
+
+	public static void main(String[] args) {
+		
+		E2E e2e = new E2E(args);
+		e2e.parseDataset();
+		e2e.createTrainingData();
+
+	}
+
+	@Override
+	public void parseDataset() {
+		
+		File trainingDataFile = new File("e2e_traindev/trainset.csv");
+		File devDataFile  = new File("e2e_traindev/devset.csv");
+		// Initialize the collections
+        setPredicates(new ArrayList<>());
+        setAttributes(new HashMap<>());
+        setAttributeValuePairs(new HashMap<>());
+        setValueAlignments(new HashMap<>());
+        getAttributes().put(singlePredicate,new HashSet<>());
+        getDatasetInstances().put(singlePredicate,new ArrayList<>());
+        
+        
+        if (true && !loadLists()) {
+        	createLists(trainingDataFile);
+        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate));
+        	getDatasetInstances().put(singlePredicate,new ArrayList<>());
+        	createLists(devDataFile);
+        	getValidationData().addAll(getDatasetInstances().get(singlePredicate));
+        	getDatasetInstances().get(singlePredicate).addAll(getTrainingData());
+        	writeLists();
+        }
+        System.out.println("Training data size: " + getTrainingData().size());
+        System.out.println("Validation data size: " + getValidationData().size());
+		
+		
+		
+		
+	}
+	public void createLists(File  dataFile){
+		System.out.println("create lists");
+        ArrayList<String> dataPart = new ArrayList<>();
+        
+        //we read in the data from the data files.
+        try {
+			BufferedReader br = new BufferedReader(new FileReader(dataFile));
+			
+			String s;
+			try {
+				s = br.readLine();
+				while(s!=null){
+					dataPart.add(s);
+					s = br.readLine();
+				}
+				
+			} catch (IOException e) {
+				
+				e.printStackTrace();
+			}
+			try {
+				br.close();
+			} catch (IOException e) {
+				
+			}
+		} catch (FileNotFoundException e) {
+			
+			e.printStackTrace();
+		}
+        // in this data set  we don't have predicate so set a single predicate just for populate the data structure
+        getPredicates().add(singlePredicate);
+        // remove the column name line
+        dataPart.remove(0);
+        // fix the errors in the data set
+        for(int i=0;i<dataPart.size();i++){
+        	
+        	if(!dataPart.get(i).contains("\",")){
+        		String line = dataPart.get(i-1);
+        		line = line +dataPart.get(i);
+        		dataPart.remove(i);
+        	}
+        }
+        // for each instance    
+        int num=0;
+        for(String line : dataPart){
+        	System.out.println(num);
+           	String MRPart = line.split("\",")[0];
+        	String RefPart = line.split("\",")[1];
+        	if(MRPart.startsWith("\"")){
+        		MRPart = MRPart.substring(1);
+        	}
+        	if(RefPart.startsWith("\"")){
+        		RefPart = RefPart.substring(1);
+        	}
+        	if(RefPart.endsWith("\"")){
+        		RefPart = RefPart.substring(0, RefPart.length()-1);
+        	}
+        	String[] MRs = MRPart.split(",");
+        	// original value to delexicalized value
+        	HashMap<String,String> delexicalizedMap = new HashMap<>();
+        	// each instance's attribute value pairs
+        	HashMap<String, HashSet<String>> attributeValues = new HashMap<>();
+        	// for each attribute value pairs
+        	for(String mr : MRs){
+        		String value = mr.substring(mr.indexOf("[")+1, mr.indexOf("]")).trim();
+        		String attribute = mr.substring(0,mr.indexOf("[")).trim();
+        		if(attribute.equals("name")){
+        			// delexicalize name values
+        			String delexValue = Action.TOKEN_X+attribute;
+        			delexicalizedMap.put(delexValue, value);
+        			
+        		}
+        		if(attribute.equals("near")){
+        			//delexicalize near values
+        			String delexValue = Action.TOKEN_X+attribute;
+        			delexicalizedMap.put(delexValue, value);
+        		}        		
+        		if(value.equals("yes")||value.equals("no")){
+        			
+        			value =attribute+" "+value;
+        		}
+        		getAttributes().put(singlePredicate,new HashSet<>());
+        		if(attribute!=null){
+        			getAttributes().get(singlePredicate).add(attribute);
+        			if(!getAttributeValuePairs().containsKey(attribute)){
+        				getAttributeValuePairs().put(attribute,new HashSet<String>());
+        			}
+        			if(!attributeValues.containsKey(attribute)){
+        				attributeValues.put(attribute, new HashSet<>());
+        			}
+        			if(value!=null){
+        				getAttributeValuePairs().get(attribute).add(value);
+        				attributeValues.get(attribute).add(value);
+        			}
+        		}        		
+        	}
+        	
+        	
+        	if(RefPart.equals("Café")){
+        		continue;
+        	}
+        	for(String deValue: delexicalizedMap.keySet()){
+        		String value = delexicalizedMap.get(deValue);
+        		if(RefPart.contains(value)){
+        			RefPart = RefPart.replace(value, deValue);
+        		}
+        	}
+        	
+        	if(RefPart.contains("@x@names")){
+        		RefPart = RefPart.replace("@x@names", "@x@name s");
+        	}
+        	// create MR for each instance 
+        	MeaningRepresentation MR = new MeaningRepresentation(singlePredicate,attributeValues,MRPart,delexicalizedMap);
+        	// start create the value alignments
+        	ArrayList<String> observedAttrValueSequence = new ArrayList<>();
+            ArrayList<String> observedWordSequence = new ArrayList<>();
+            // replace the punctuation in the reference
+            RefPart = RefPart.replaceAll("[.,?:;!']", " "+Action.TOKEN_PUNCT+" ");
+            String[] words = RefPart.split(" ");
+            for(String w: words){
+            	
+            	observedWordSequence.add(w.trim());
+            }
+         // We store the maximum observed word sequence length, to use as a limit during generation
+            if (observedWordSequence.size() > getMaxWordSequenceLength()) {
+                setMaxWordSequenceLength(observedWordSequence.size());
+            }
+            // We initialize the alignments between words and attribute/value pairs
+            ArrayList<String> wordToAttrValueAlignment = new ArrayList<>();
+            for(String w: observedWordSequence){
+            	if(w.equals(Action.TOKEN_PUNCT)){
+            		wordToAttrValueAlignment.add(Action.TOKEN_PUNCT);
+            	}
+            	else{
+            		wordToAttrValueAlignment.add("[]");
+            	}
+            }
+            ArrayList<Action> directReferenceSequence = new ArrayList<>();
+            for (int r = 0; r < observedWordSequence.size(); r++) {
+                directReferenceSequence.add(new Action(observedWordSequence.get(r), wordToAttrValueAlignment.get(r)));
+            } 
+            DatasetInstance DI = new DatasetInstance(MR, directReferenceSequence, postProcessRef(MR, directReferenceSequence));            
+            getDatasetInstances().get(singlePredicate).stream().filter((existingDI) -> (existingDI.getMeaningRepresentation().getAbstractMR()
+            		.equals(DI.getMeaningRepresentation().getAbstractMR()))).map((existingDI) -> {
+                existingDI.getEvaluationReferences().addAll(DI.getEvaluationReferences());
+                return existingDI;
+            }).forEachOrdered((existingDI) -> {
+                // We add the direct reference of this DatasetInstance as an available evaluation reference to all previously constructed DatasetInstance that are identical to this one
+                DI.getEvaluationReferences().addAll(existingDI.getEvaluationReferences());
+            });
+            getDatasetInstances().get(singlePredicate).add(DI);
+            // value alignments
+            HashMap<String, HashMap<String, Double>> observedValueAlignments = new HashMap<>();
+            MR.getAttributeValues().keySet().stream().forEach((attr)->{
+            	MR.getAttributeValues().get(attr).stream().filter((value)->(!value.startsWith(Action.TOKEN_X)))
+            	.forEachOrdered((value)->{
+            		String valueToCompare = value;
+            		if(valueToCompare.contains("familyFriendly")){
+            			valueToCompare = valueToCompare.replace("familyFriendly", "family friendly");
+            		}
+            		observedValueAlignments.put(valueToCompare, new HashMap<String, Double>());
+            		// n grams 
+                    for (int n = 1; n < observedWordSequence.size(); n++) {
+                        //Calculate the similaritie between them and valueToCompare
+                        for (int r = 0; r <= observedWordSequence.size() - n; r++) {
+                        	boolean compareAgainstNGram = true;
+                        	for (int j = 0; j < n; j++) {
+                        		if (observedWordSequence.get(r + j).startsWith(Action.TOKEN_X)
+                        				||observedWordSequence.get(r + j).equals(Action.TOKEN_PUNCT)
+                        				||observedWordSequence.get(r+j).isEmpty()){
+                        			compareAgainstNGram = false;
+                        			
+                        		}
+                        	}
+                        	if (compareAgainstNGram) {
+                                String align = "";
+                                String compare = "";
+                                String backwardCompare = "";
+                                for (int j = 0; j < n; j++) {
+                                    // The coordinates of the alignment
+                                    align += (r + j) + " ";
+                                    compare += observedWordSequence.get(r + j);
+                                    backwardCompare = observedWordSequence.get(r + j) + backwardCompare;
+                                }
+                                align = align.trim();
+
+                                // Calculate the character-level distance between the value and the nGram (in its original and reversed order)
+                                Double distance = Levenshtein.getSimilarity(valueToCompare.toLowerCase(), compare.toLowerCase(), true);
+                                Double backwardDistance = Levenshtein.getSimilarity(valueToCompare.toLowerCase(), backwardCompare.toLowerCase(), true);
+
+                                // We keep the best distance score; note that the Levenshtein distance is normalized so that greater is better 
+                                if (backwardDistance > distance) {
+                                    distance = backwardDistance;
+                                }
+                                // We ignore all nGrams that are less similar than a threshold
+                                if (distance > 0.5) {
+                                    
+                                   observedValueAlignments.get(valueToCompare).put(align, distance);
+                                    
+                                }
+                            }
+                        	
+                        }
+                    }
+            	});
+            });
+            // We filter out any values that haven't been aligned
+            HashSet<String> toRemove = new HashSet<>();
+            for (String value : observedValueAlignments.keySet()) {
+                if (observedValueAlignments.get(value).isEmpty()) {
+                    toRemove.add(value);
+                }
+            }
+            for (String value : toRemove) {
+                observedValueAlignments.remove(value);
+            }
+            while (!observedValueAlignments.keySet().isEmpty()) {
+                // Find the best aligned nGram
+                Double max = Double.NEGATIVE_INFINITY;
+                String[] bestAlignment = new String[2];
+                for (String value : observedValueAlignments.keySet()) {
+                    for (String alignment : observedValueAlignments.get(value).keySet()) {
+                        if (observedValueAlignments.get(value).get(alignment) > max) {
+                            max = observedValueAlignments.get(value).get(alignment);
+                            bestAlignment[0] = value;
+                            bestAlignment[1] = alignment;
+                        }
+                    }
+                }
+             // Find the subphrase that corresponds to the best aligned nGram, according to the coordinates
+                ArrayList<String> alignedStr = new ArrayList<>();
+                String[] coords = bestAlignment[1].split(" ");
+                if (coords.length == 1) {
+                    alignedStr.add(observedWordSequence.get(Integer.parseInt(coords[0].trim())));
+                } else {
+                    for (int a = Integer.parseInt(coords[0].trim()); a <= Integer.parseInt(coords[coords.length - 1].trim()); a++) {
+                        alignedStr.add(observedWordSequence.get(a));
+                    }
+                }
+             // Store the best aligned nGram
+                if (!getValueAlignments().containsKey(bestAlignment[0])) {
+                    getValueAlignments().put(bestAlignment[0], new HashMap<ArrayList<String>, Double>());
+                }
+                getValueAlignments().get(bestAlignment[0]).put(alignedStr, max);
+             // And remove it from the observed ones for this instance
+                observedValueAlignments.remove(bestAlignment[0]);
+             // And also remove any other aligned nGrams that are overlapping with the best aligned nGram
+                observedValueAlignments.keySet().forEach((value) -> {
+                    HashSet<String> alignmentsToBeRemoved = new HashSet<>();
+                    observedValueAlignments.get(value).keySet().forEach((alignment) -> {
+                        String[] othCoords = alignment.split(" ");
+                        if (Integer.parseInt(coords[0].trim()) <= Integer.parseInt(othCoords[0].trim()) && (Integer.parseInt(coords[coords.length - 1].
+                        		trim()) >= Integer.parseInt(othCoords[0].trim()))
+                                || (Integer.parseInt(othCoords[0].trim()) <= Integer.parseInt(coords[0].trim()) && Integer.parseInt(othCoords[othCoords.length - 1].
+                                		trim()) >= Integer.parseInt(coords[0].trim()))) {
+                            alignmentsToBeRemoved.add(alignment);
+                        }
+                    });
+                    alignmentsToBeRemoved.forEach((alignment) -> {
+                        observedValueAlignments.get(value).remove(alignment);
+                    });
+                });
+                // We filter out any values that are no longer aligned (due to overlapping conflicts)
+                toRemove = new HashSet<>();
+                for (String value : observedValueAlignments.keySet()) {
+                    if (observedValueAlignments.get(value).isEmpty()) {
+                        toRemove.add(value);
+                    }
+                }
+                for (String value : toRemove) {
+                    observedValueAlignments.remove(value);
+                }
+            
+                
+            }
+            getObservedAttrValueSequences().add(observedAttrValueSequence);
+            
+         num++;   
+        }
+        
+        
+        
+        
+	}
+	public void writeLists() {
+        String file1 = "cache/getPredicates()";
+        String file2 = "cache/attributes";
+        String file3 = "cache/attributeValuePairs";
+        String file4 = "cache/getValueAlignments()" ;
+        String file5 = "cache/getDatasetInstances";
+        String file6 = "cache/maxLengths" ;
+        String file7 = "cache/getValidationDatasetInstances";
+        String file8 = "cache/getTrainingDatasetInstances";
+        FileOutputStream fout1 = null;
+        ObjectOutputStream oos1 = null;
+        FileOutputStream fout2 = null;
+        ObjectOutputStream oos2 = null;
+        FileOutputStream fout3 = null;
+        ObjectOutputStream oos3 = null;
+        FileOutputStream fout4 = null;
+        ObjectOutputStream oos4 = null;
+        FileOutputStream fout5 = null;
+        ObjectOutputStream oos5 = null;
+        FileOutputStream fout6 = null;
+        ObjectOutputStream oos6 = null;
+        FileOutputStream fout7 = null;
+        ObjectOutputStream oos7 = null;
+        FileOutputStream fout8 = null;
+        ObjectOutputStream oos8 = null;
+        try {
+            System.out.print("Write lists...");
+            fout1 = new FileOutputStream(file1);
+            oos1 = new ObjectOutputStream(fout1);
+            oos1.writeObject(getPredicates());
+            ///////////////////
+            fout2 = new FileOutputStream(file2);
+            oos2 = new ObjectOutputStream(fout2);
+            oos2.writeObject(getAttributes());
+            ///////////////////
+            fout3 = new FileOutputStream(file3);
+            oos3 = new ObjectOutputStream(fout3);
+            oos3.writeObject(getAttributeValuePairs());
+            ///////////////////
+            fout4 = new FileOutputStream(file4);
+            oos4 = new ObjectOutputStream(fout4);
+            oos4.writeObject(getValueAlignments());
+            ///////////////////
+            fout5 = new FileOutputStream(file5);
+            oos5 = new ObjectOutputStream(fout5);
+            oos5.writeObject(getDatasetInstances());
+            ///////////////////
+            fout6 = new FileOutputStream(file6);
+            oos6 = new ObjectOutputStream(fout6);
+            //ArrayList<Integer> lengths = new ArrayList<Integer>();
+            //lengths.add(getMaxContentSequenceLength());
+            //lengths.add(getMaxWordSequenceLength());
+            oos6.writeObject(getMaxWordSequenceLength());
+            fout7 = new FileOutputStream(file7);
+            oos7 = new ObjectOutputStream(fout7);
+            oos7.writeObject(getValidationData());
+            fout8 = new FileOutputStream(file8);
+            oos8 = new ObjectOutputStream(fout8);
+            oos8.writeObject(getTrainingData());
+        } catch (IOException ex) {
+        } finally {
+            try {
+                fout1.close();
+                fout2.close();
+                fout3.close();
+                fout4.close();
+                fout5.close();
+                fout6.close();
+            } catch (IOException ex) {
+            }
+            try {
+                oos1.close();
+                oos2.close();
+                oos3.close();
+                oos4.close();
+                oos5.close();
+                oos6.close();
+            } catch (IOException ex) {
+            }
+        }
+    }
+	@SuppressWarnings("unchecked")
+	public boolean loadLists() {
+		String file1 = "cache/getPredicates()";
+        String file2 = "cache/attributes";
+        String file3 = "cache/attributeValuePairs";
+        String file4 = "cache/getValueAlignments()" ;
+        String file5 = "cache/getDatasetInstances";
+        String file6 = "cache/maxLengths" ;
+        String file7 = "cache/getValidationDatasetInstances";
+        String file8 = "cache/getTrainingDatasetInstances";
+        FileInputStream fin1 = null;
+        ObjectInputStream ois1 = null;
+        FileInputStream fin2 = null;
+        ObjectInputStream ois2 = null;
+        FileInputStream fin3 = null;
+        ObjectInputStream ois3 = null;
+        FileInputStream fin4 = null;
+        ObjectInputStream ois4 = null;
+        FileInputStream fin5 = null;
+        ObjectInputStream ois5 = null;
+        FileInputStream fin6 = null;
+        ObjectInputStream ois6 = null;
+        FileInputStream fin7 = null;
+        ObjectInputStream ois7 = null;
+        FileInputStream fin8 = null;
+        ObjectInputStream ois8 = null;
+        if ((new File(file1)).exists()
+                && (new File(file2)).exists()
+                && (new File(file3)).exists()
+                && (new File(file4)).exists()
+                && (new File(file5)).exists()
+                && (new File(file6)).exists()
+                && (new File(file7)).exists()
+                && (new File(file8)).exists()) {
+            try {
+                System.out.print("Load lists...");
+                fin1 = new FileInputStream(file1);
+                ois1 = new ObjectInputStream(fin1);
+                Object o1 = ois1.readObject();
+                if (getPredicates() == null) {
+                    if (o1 instanceof ArrayList) {
+                        setPredicates(new ArrayList<String>((Collection<? extends String>) o1));
+                    }
+                } else if (o1 instanceof ArrayList) {
+                    getPredicates().addAll((Collection<? extends String>) o1);
+                }
+                ///////////////////
+                fin2 = new FileInputStream(file2);
+                ois2 = new ObjectInputStream(fin2);
+                Object o2 = ois2.readObject();
+                if (getAttributes() == null) {
+                    if (o2 instanceof HashMap) {
+                        setAttributes(new HashMap<String, HashSet<String>>((Map<? extends String, ? extends HashSet<String>>) o2));
+                    }
+                } else if (o2 instanceof HashMap) {
+                    getAttributes().putAll((Map<? extends String, ? extends HashSet<String>>) o2);
+                }
+                ///////////////////
+                fin3 = new FileInputStream(file3);
+                ois3 = new ObjectInputStream(fin3);
+                Object o3 = ois3.readObject();
+                if (getAttributeValuePairs() == null) {
+                    if (o3 instanceof HashMap) {
+                        setAttributeValuePairs(new HashMap<String, HashSet<String>>((Map<? extends String, ? extends HashSet<String>>) o3));
+                    }
+                } else if (o3 instanceof HashMap) {
+                    getAttributeValuePairs().putAll((Map<? extends String, ? extends HashSet<String>>) o3);
+                }
+                ///////////////////
+                fin4 = new FileInputStream(file4);
+                ois4 = new ObjectInputStream(fin4);
+                Object o4 = ois4.readObject();
+                if (getValueAlignments() == null) {
+                    if (o4 instanceof HashMap) {
+                        setValueAlignments(new HashMap<String, HashMap<ArrayList<String>, Double>>((Map<? extends String, ? extends HashMap<ArrayList<String>, Double>>) o4));
+                    }
+                } else if (o4 instanceof HashMap) {
+                    getValueAlignments().putAll((Map<? extends String, ? extends HashMap<ArrayList<String>, Double>>) o4);
+                }
+                ///////////////////
+                fin5 = new FileInputStream(file5);
+                ois5 = new ObjectInputStream(fin5);
+                Object o5 = ois5.readObject();
+                if (getDatasetInstances() == null) {
+                    if (o5 instanceof HashMap) {
+                        setDatasetInstances(new HashMap<String, ArrayList<DatasetInstance>>((Map<? extends String, ? extends ArrayList<DatasetInstance>>) o5));
+                    }
+                } else if (o5 instanceof HashMap) {
+                    getDatasetInstances().putAll((Map<? extends String, ? extends ArrayList<DatasetInstance>>) o5);
+                }
+                ///////////////////
+                fin6 = new FileInputStream(file6);
+                ois6 = new ObjectInputStream(fin6);
+                Object o6 = ois6.readObject();
+                //ArrayList<Integer> lengths = new ArrayList<Integer>((Collection<? extends Integer>) o6);
+                //setMaxContentSequenceLength(lengths.get(0));
+                setMaxWordSequenceLength((Integer)o6);
+                ///////////////////
+                fin7 = new FileInputStream(file7);
+                ois7 = new ObjectInputStream(fin7);
+                Object o7 = ois7.readObject();
+                if(getValidationData()==null){
+                	if(o7 instanceof ArrayList){
+                		setValidationData(new ArrayList<DatasetInstance>((Collection<? extends DatasetInstance>)o7));
+                	}
+                }else if(o7 instanceof ArrayList){
+                	getValidationData().addAll(new ArrayList<DatasetInstance>((Collection<? extends DatasetInstance>)o7));
+                }
+                fin8 = new FileInputStream(file8);
+                ois8 = new ObjectInputStream(fin8);
+                Object o8 = ois8.readObject();
+                if(getTrainingData()==null){
+                	if(o8 instanceof ArrayList){
+                		setTrainingData(new ArrayList<DatasetInstance>((Collection<? extends DatasetInstance>)o8));
+                	}
+                }else if(o8 instanceof ArrayList){
+                	getTrainingData().addAll(new ArrayList<DatasetInstance>((Collection<? extends DatasetInstance>)o8));
+                }
+                
+
+                System.out.println("done!");
+            } catch (ClassNotFoundException | IOException ex) {
+            } finally {
+                try {
+                    fin1.close();
+                    fin2.close();
+                    fin3.close();
+                    fin4.close();
+                    fin5.close();
+                    fin6.close();
+                    fin7.close();
+                    fin8.close();
+                } catch (IOException ex) {
+                }
+                try {
+                    ois1.close();
+                    ois2.close();
+                    ois3.close();
+                    ois4.close();
+                    ois5.close();
+                    ois6.close();
+                    ois7.close();
+                    ois8.close();
+                } catch (IOException ex) {
+                }
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+	@Override
+	public void createTrainingData() {
+		
+		
+		System.out.println("create naive alignments");
+		createNaiveAlignments(getTrainingData());
+		System.out.println("done");
+		
+		
+		//  create language model for word sequence and content sequence
+		if(!loadLMs()){
+			HashMap<String, ArrayList<ArrayList<String>>> LMWordTrainingPerPred = new HashMap<>();
+			HashMap<String, ArrayList<ArrayList<String>>> LMAttrTrainingPerPred = new HashMap<>();	
+			LMWordTrainingPerPred.put(singlePredicate, new ArrayList<>());	
+			LMAttrTrainingPerPred.put(singlePredicate, new ArrayList<>());
+			getTrainingData().stream().forEach((di)->{
+				ArrayList<String> wordSeq = new ArrayList<>();
+				ArrayList<String> attrSeq = new ArrayList<>();
+				wordSeq.add("@@");
+				wordSeq.add("@@");
+				attrSeq.add("@@");
+				attrSeq.add("@@");
+				for(int n=0;n<di.getDirectReferenceSequence().size();n++){
+					if(!di.getDirectReferenceSequence().get(n).getAttribute().equals(Action.TOKEN_END)
+							&&!di.getDirectReferenceSequence().get(n).getWord().equals(Action.TOKEN_END)){
+						wordSeq.add(di.getDirectReferenceSequence().get(n).getWord());
+						if(attrSeq.isEmpty()){
+							attrSeq.add(di.getDirectReferenceSequence().get(n).getAttribute());
+						}else if(!di.getDirectReferenceSequence().get(n).getAttribute().equals(attrSeq.get(attrSeq.size()-1))){
+							attrSeq.add(di.getDirectReferenceSequence().get(n).getAttribute());
+						}
+					}
+				}
+				wordSeq.add(Action.TOKEN_END);
+				LMWordTrainingPerPred.get(singlePredicate).add(wordSeq);
+				LMAttrTrainingPerPred.get(singlePredicate).add(attrSeq);
+			});
+			setWordLMsPerPredicate(new HashMap<>());
+			setContentLMsPerPredicate(new HashMap<>());
+			SimpleLM simpleWordLM = new SimpleLM(3);
+			simpleWordLM.trainOnStrings(LMWordTrainingPerPred.get(singlePredicate));
+			getWordLMsPerPredicate().put(singlePredicate, simpleWordLM);
+			SimpleLM simpleAttrLM = new SimpleLM(3);
+			simpleAttrLM.trainOnStrings(LMAttrTrainingPerPred.get(singlePredicate));
+			getContentLMsPerPredicate().put(singlePredicate, simpleAttrLM);
+			writeLMs();
+		}
+		//available content and word actions
+		HashMap<String, HashSet<String>> availableContentActions = new HashMap<>();
+        HashMap<String, HashMap<String, HashSet<Action>>> availableWordActions = new HashMap<>();
+        availableContentActions.put(singlePredicate, new HashSet<>());
+    	availableWordActions.put(singlePredicate, new HashMap<>());
+        getTrainingData().stream().forEach((di)->{
+        	
+        	for(String attr: di.getMeaningRepresentation().getAttributeValues().keySet()){
+        		availableContentActions.get(singlePredicate).add(attr.toLowerCase());
+        		if(!availableWordActions.get(singlePredicate).containsKey(attr.toLowerCase())){
+        			availableWordActions.get(singlePredicate).put(attr.toLowerCase(), new HashSet<>());
+        		}
+        		di.getDirectReferenceSequence().stream().forEach((action)->{
+        			if(!action.getWord().equals(Action.TOKEN_PUNCT)&&
+        					!action.getWord().equals(Action.TOKEN_START)){
+        				availableWordActions.get(singlePredicate).get(attr.toLowerCase()).add(new Action(action.getWord(),attr.toLowerCase()));
+        			}
+        			
+        		});
+        		
+        		
+        	}
+        	availableContentActions.get(singlePredicate).add(Action.TOKEN_END);
+        	availableWordActions.get(singlePredicate).put(Action.TOKEN_END,new HashSet<>());
+        	availableWordActions.get(singlePredicate).get(Action.TOKEN_END).add(new Action(Action.TOKEN_END,Action.TOKEN_END));
+        	
+        });
+        setAvailableContentActions(availableContentActions);
+        setAvailableWordActions(availableWordActions);
+        
+        // create training instances
+        
+        if(!loadTrainingData(getTrainingData().size())){
+        	System.out.print("Create training data...");
+        	Object[] results = inferFeatureAndCostVectors();
+        	System.out.print("almost...");
+        	@SuppressWarnings("unchecked")
+            ConcurrentHashMap<DatasetInstance, HashMap<String, ArrayList<Instance>>> getPredicateContentTrainingDataBefore = (ConcurrentHashMap<DatasetInstance, HashMap<String, ArrayList<Instance>>>) results[0];
+            @SuppressWarnings("unchecked")
+            ConcurrentHashMap<DatasetInstance, HashMap<String, HashMap<String, ArrayList<Instance>>>> getPredicateWordTrainingDataBefore = (ConcurrentHashMap<DatasetInstance, HashMap<String, HashMap<String, ArrayList<Instance>>>>) results[1];
+            // Reorganize the feature/cost vector collections 
+            // Initially they are mapped according to DatasetInstance (since it helps with parallel processing) but we prefer them mapped by predicate for training
+            setPredicateContentTrainingData(new HashMap<>());
+            getTrainingData().forEach((di) -> {
+                getPredicateContentTrainingDataBefore.get(di).keySet().stream().map((predicate) -> {
+                    if (!getPredicateContentTrainingData().containsKey(predicate)) {
+                        getPredicateContentTrainingData().put(predicate, new ArrayList<Instance>());
+                    }
+                    return predicate;
+                }).forEachOrdered((predicate) -> {
+                    getPredicateContentTrainingData().get(predicate).addAll(getPredicateContentTrainingDataBefore.get(di).get(predicate));
+                });
+            });
+            setPredicateWordTrainingData(new HashMap<>());
+            getTrainingData().forEach((di) -> {
+                getPredicateWordTrainingDataBefore.get(di).keySet().stream().map((predicate) -> {
+                    if (!getPredicateWordTrainingData().containsKey(predicate)) {
+                        getPredicateWordTrainingData().put(predicate, new HashMap<String, ArrayList<Instance>>());
+                    }
+                    return predicate;
+                }).forEachOrdered((predicate) -> {
+                    getPredicateWordTrainingDataBefore.get(di).get(predicate).keySet().stream().map((attribute) -> {
+                        if (!getPredicateWordTrainingData().get(predicate).containsKey(attribute)) {
+                            getPredicateWordTrainingData().get(predicate).put(attribute, new ArrayList<Instance>());
+                        }
+                        return attribute;
+                    }).forEachOrdered((attribute) -> {
+                        getPredicateWordTrainingData().get(predicate).get(attribute).addAll(getPredicateWordTrainingDataBefore.get(di).get(predicate).get(attribute));
+                    });
+                });
+            });
+            writeTrainingData(getTrainingData().size());
+        }
+	}
+	@SuppressWarnings("unchecked")
+	public boolean loadTrainingData(int dataSize) {
+        String file1 = "cache/attrTrainingData"+ "_" + dataSize;
+        String file2 = "cache/wordTrainingData"+ "_" + dataSize;
+        FileInputStream fin1 = null;
+        ObjectInputStream ois1 = null;
+        FileInputStream fin2 = null;
+        ObjectInputStream ois2 = null;
+        if ((new File(file1)).exists()
+                && (new File(file2)).exists()) {
+            try {
+                System.out.print("Load training data...");
+                fin1 = new FileInputStream(file1);
+                ois1 = new ObjectInputStream(fin1);
+                Object o1 = ois1.readObject();
+                if (getPredicateContentTrainingData() == null) {
+                    if (o1 instanceof HashMap) {
+                        setPredicateContentTrainingData(new HashMap<String, ArrayList<Instance>>((Map<? extends String, ? extends ArrayList<Instance>>) o1));
+                    }
+                } else if (o1 instanceof HashMap) {
+                    getPredicateContentTrainingData().putAll((Map<? extends String, ? extends ArrayList<Instance>>) o1);
+                }
+
+                fin2 = new FileInputStream(file2);
+                ois2 = new ObjectInputStream(fin2);
+                Object o2 = ois2.readObject();
+                if (getPredicateWordTrainingData() == null) {
+                    if (o2 instanceof HashMap) {
+                        setPredicateWordTrainingData(new HashMap<String, HashMap<String, ArrayList<Instance>>>((Map<? extends String, ? extends HashMap<String, ArrayList<Instance>>>) o2));
+                    }
+                } else if (o2 instanceof HashMap) {
+                    getPredicateWordTrainingData().putAll((Map<? extends String, ? extends HashMap<String, ArrayList<Instance>>>) o2);
+                }
+
+            } catch (ClassNotFoundException | IOException ex) {
+            } finally {
+                try {
+                    fin1.close();
+                    fin2.close();
+                } catch (IOException ex) {
+                }
+                try {
+                    ois1.close();
+                    ois2.close();
+                } catch (IOException ex) {
+                }
+            }
+        } else {
+            return false;
+        }
+        return true;
+    }
+	public void writeTrainingData(int dataSize) {
+        String file1 = "cache/attrTrainingData" + "_" + dataSize;
+        String file2 = "cache/wordTrainingData" + "_" + dataSize;
+        FileOutputStream fout1 = null;
+        ObjectOutputStream oos1 = null;
+        FileOutputStream fout2 = null;
+        ObjectOutputStream oos2 = null;
+        try {
+            System.out.print("Write Training Data...");
+            fout1 = new FileOutputStream(file1);
+            oos1 = new ObjectOutputStream(fout1);
+            oos1.writeObject(getPredicateContentTrainingData());
+
+            fout2 = new FileOutputStream(file2);
+            oos2 = new ObjectOutputStream(fout2);
+            oos2.writeObject(getPredicateWordTrainingData());
+
+        } catch (IOException ex) {
+        } finally {
+            try {
+                fout1.close();
+                fout2.close();
+            } catch (IOException ex) {
+            }
+            try {
+                oos1.close();
+                oos2.close();
+            } catch (IOException ex) {
+            }
+        }
+    }
+	public Object[] inferFeatureAndCostVectors() {
+		ConcurrentHashMap<DatasetInstance, HashMap<String, ArrayList<Instance>>> contentTrainingData = new ConcurrentHashMap<>();
+        ConcurrentHashMap<DatasetInstance, HashMap<String, HashMap<String, ArrayList<Instance>>>> wordTrainingData = new ConcurrentHashMap<>();
+        if (!getAvailableWordActions().isEmpty() && !getPredicates().isEmpty()) {
+            // Initialize collections
+            getTrainingData().stream().map((di) -> {
+                contentTrainingData.put(di, new HashMap<String, ArrayList<Instance>>());
+                return di;
+            }).map((di) -> {
+                wordTrainingData.put(di, new HashMap<String, HashMap<String, ArrayList<Instance>>>());
+                return di;
+            }).forEachOrdered((di) -> {
+                getPredicates().stream().map((predicate) -> {
+                    contentTrainingData.get(di).put(predicate, new ArrayList<Instance>());
+                    return predicate;
+                }).map((predicate) -> {
+                    wordTrainingData.get(di).put(predicate, new HashMap<String, ArrayList<Instance>>());
+                    return predicate;
+                }).forEachOrdered((predicate) -> {
+                    getAttributes().get(predicate).stream().filter((attribute) -> (!wordTrainingData.get(di).get(predicate).containsKey(attribute))).forEachOrdered((attribute) -> {
+                        wordTrainingData.get(di).get(predicate).put(attribute, new ArrayList<Instance>());
+                    });
+                });
+            });
+         // Infer the vectors in parallel processes to save time
+            ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
+            
+            getTrainingData().forEach((di) -> {
+            	//System.out.println("1");
+            	
+            	//InferE2EVectorsThread thread = new InferE2EVectorsThread(di, this, contentTrainingData, wordTrainingData);
+            	//thread.run();
+            	
+                executor.execute(new InferE2EVectorsThread(di, this, contentTrainingData, wordTrainingData));
+            });
+            executor.shutdown();
+            while (!executor.isTerminated()) {
+            }
+        }
+		
+		
+		
+		
+		
+		Object[] results = new Object[2];
+		results[0] = contentTrainingData;
+        results[1] = wordTrainingData;
+		return results;
+	}
+	@SuppressWarnings("unchecked")
+	public boolean loadLMs() {
+        String file2 = "cache/wordLMs";
+        String file3 = "cache/attrLMs";
+        FileInputStream fin2 = null;
+        ObjectInputStream ois2 = null;
+        FileInputStream fin3 = null;
+        ObjectInputStream ois3 = null;
+        if ((new File(file2)).exists()
+                && (new File(file3)).exists()) {
+            try {
+                System.out.println("Load language models...");
+                
+                fin2 = new FileInputStream(file2);
+                ois2 = new ObjectInputStream(fin2);
+                Object o2 = ois2.readObject();
+                if (getWordLMsPerPredicate() == null) {
+                    if (o2 instanceof HashMap) {
+                        setWordLMsPerPredicate(new HashMap<String, SimpleLM>((Map<? extends String, ? extends SimpleLM>) o2));
+                    }
+                } else if (o2 instanceof HashMap) {
+                    getWordLMsPerPredicate().putAll((Map<? extends String, ? extends SimpleLM>) o2);
+                }
+
+                fin3 = new FileInputStream(file3);
+                ois3 = new ObjectInputStream(fin3);
+                Object o3 = ois3.readObject();
+                if (getContentLMsPerPredicate() == null) {
+                    if (o3 instanceof HashMap) {
+                        setContentLMsPerPredicate(new HashMap<String, SimpleLM>((Map<? extends String, ? extends SimpleLM>) o3));
+                    }
+                } else if (o3 instanceof HashMap) {
+                    getContentLMsPerPredicate().putAll((Map<? extends String, ? extends SimpleLM>) o3);
+                }
+
+            } catch (ClassNotFoundException | IOException ex) {
+            } finally {
+                try {
+                    fin2.close();
+                    fin3.close();
+                } catch (IOException ex) {
+                }
+                try {
+                    ois2.close();
+                    ois3.close();
+                } catch (IOException ex) {
+                }
+            }
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+	public void writeLMs() {
+        String file2 = "cache/wordLMs" ;
+        String file3 = "cache/attrLMs" ;
+        FileOutputStream fout2 = null;
+        ObjectOutputStream oos2 = null;
+        FileOutputStream fout3 = null;
+        ObjectOutputStream oos3 = null;
+        try {
+            System.out.print("Write LMs...");
+            fout2 = new FileOutputStream(file2);
+            oos2 = new ObjectOutputStream(fout2);
+            oos2.writeObject(getWordLMsPerPredicate());
+
+            fout3 = new FileOutputStream(file3);
+            oos3 = new ObjectOutputStream(fout3);
+            oos3.writeObject(getContentLMsPerPredicate());
+        } catch (IOException ex) {
+        } finally {
+            try {
+                fout2.close();
+                fout3.close();
+            } catch (IOException ex) {
+            }
+            try {
+                oos2.close();
+                oos3.close();
+            } catch (IOException ex) {
+            }
+        }
+    }
+	@Override
+	public Double evaluateGeneration(HashMap<String, JAROW> classifierAttrs,
+			HashMap<String, HashMap<String, JAROW>> classifierWords, ArrayList<DatasetInstance> testingData,
+			int epoch) {
+		
+		return null;
+	}
+
+	@Override
+	public void createNaiveAlignments(ArrayList<DatasetInstance> trainingData) {
+		HashMap<String, HashMap<ArrayList<Action>, HashMap<Action, Integer>>> punctPatterns = new HashMap<>();
+        getPredicates().forEach((predicate) -> {
+            punctPatterns.put(predicate, new HashMap<ArrayList<Action>, HashMap<Action, Integer>>());//punctPattern key:predicate
+        });
+        HashMap<DatasetInstance, ArrayList<Action>> punctRealizations = new HashMap<DatasetInstance, ArrayList<Action>>();
+
+        trainingData.stream().map((di) -> {
+            HashMap<ArrayList<Action>, ArrayList<Action>> calculatedRealizationsCache = new HashMap<>();//key directReferenceSequence
+            HashSet<ArrayList<Action>> initRealizations = new HashSet<>();
+            if (!calculatedRealizationsCache.containsKey(di.getDirectReferenceSequence())) {
+                initRealizations.add(di.getDirectReferenceSequence());
+            }
+            initRealizations.stream().map((realization) -> {
+                HashMap<String, HashSet<String>> values = new HashMap<>();
+                di.getMeaningRepresentation().getAttributeValues().keySet().forEach((attr) -> {
+                    values.put(attr, new HashSet<>(di.getMeaningRepresentation().getAttributeValues().get(attr)));//attr to value
+                });
+                ArrayList<Action> randomRealization = new ArrayList<>();
+                for (int i = 0; i < realization.size(); i++) {
+                    Action a = realization.get(i);
+                    if (a.getAttribute().equals(Action.TOKEN_PUNCT)) {
+                        randomRealization.add(new Action(a.getWord(), a.getAttribute()));//only record the punct
+                    } else {
+                        randomRealization.add(new Action(a.getWord(), ""));
+                    }
+                }
+                if (values.keySet().isEmpty()) {
+                    for (int i = 0; i < randomRealization.size(); i++) {
+                        if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
+                            if (!getAttributes().get(di.getMeaningRepresentation().getPredicate()).contains("empty")) {
+                                getAttributes().get(di.getMeaningRepresentation().getPredicate()).add("empty");
+                            }
+                            randomRealization.get(i).setAttribute("empty=empty");
+                        }
+                    }
+                } else {
+                    HashMap<Double, HashMap<String, ArrayList<Integer>>> indexAlignments = new HashMap<>();
+                    //HashSet<String> noValueAttrs = new HashSet<String>();
+                    values.keySet().forEach((attr) -> {
+                        values.get(attr).stream().filter((value) -> ((! value.startsWith(Action.TOKEN_X))
+                                && !value.isEmpty())).map((value) -> {
+                            String valueToCheck = value;/*
+                            if (valueToCheck.equals("no")
+                                    || valueToCheck.equals("yes")
+                                    || valueToCheck.equals("yes or no")
+                                    || valueToCheck.equals("none")
+                                    //|| attr.equals("dont_care")
+                                    || valueToCheck.equals("empty")) {
+                                valueToCheck = attr + ":" + value;
+                                noValueAttrs.add(attr + "=" + value);
+                            }
+                            if (valueToCheck.equals(attr)) {
+                                noValueAttrs.add(attr + "=" + value);
+                            }*/
+                            return valueToCheck;
+                        }).filter((valueToCheck) -> (!valueToCheck.equals("empty:empty")
+                                && getValueAlignments().containsKey(valueToCheck))).forEachOrdered((valueToCheck) -> {
+                            for (ArrayList<String> align : getValueAlignments().get(valueToCheck).keySet()) {
+                                int n = align.size();
+                                for (int i = 0; i <= randomRealization.size() - n; i++) {
+                                    ArrayList<String> compare = new ArrayList<String>();
+                                    ArrayList<Integer> indexAlignment = new ArrayList<Integer>();
+                                    for (int j = 0; j < n; j++) {
+                                        compare.add(randomRealization.get(i + j).getWord());
+                                        indexAlignment.add(i + j);
+                                    }
+                                    if (compare.equals(align)) {
+                                        if (!indexAlignments.containsKey(getValueAlignments().get(valueToCheck).get(align))) {
+                                            indexAlignments.put(getValueAlignments().get(valueToCheck).get(align), new HashMap<>());
+                                        }
+                                        indexAlignments.get(getValueAlignments().get(valueToCheck).get(align)).put(attr + "=" + valueToCheck, indexAlignment);
+                                    }
+                                }
+                            }
+                        });
+                    });
+                    ArrayList<Double> similarities = new ArrayList<>(indexAlignments.keySet());
+                    Collections.sort(similarities);
+                    HashSet<String> assignedAttrValues = new HashSet<String>();
+                    HashSet<Integer> assignedIntegers = new HashSet<Integer>();
+                    for (int i = similarities.size() - 1; i >= 0; i--) {
+                        for (String attrValue : indexAlignments.get(similarities.get(i)).keySet()) {
+                            if (!assignedAttrValues.contains(attrValue)) {
+                                boolean isUnassigned = true;
+                                for (Integer index : indexAlignments.get(similarities.get(i)).get(attrValue)) {
+                                    if (assignedIntegers.contains(index)) {
+                                        isUnassigned = false;
+                                    }
+                                }
+                                if (isUnassigned) {
+                                    assignedAttrValues.add(attrValue);
+                                    for (Integer index : indexAlignments.get(similarities.get(i)).get(attrValue)) {
+                                        assignedIntegers.add(index);
+                                        randomRealization.get(index).setAttribute(attrValue.toLowerCase().trim());
+                                    }
+                                }
+                            }
+                        }
+                    }//value alignment part has been assigned
+                    
+                    
+                    
+                    //System.out.println("-1: " + randomRealization);
+                    randomRealization.stream().filter((a) -> (a.getWord().startsWith(Action.TOKEN_X))).forEachOrdered((a) -> {
+                        String attr = a.getWord().substring(3).toLowerCase().trim();
+                        a.setAttribute(attr + "=" + a.getWord());
+                    });/*
+                    HashSet<String> unalignedNoValueAttrs = new HashSet<>();
+                    noValueAttrs.forEach((noValueAttr) -> {
+                        boolean assigned = false;
+                        for (Action a : randomRealization) {
+                            if (a.getAttribute().equals(noValueAttr)) {
+                                assigned = true;
+                            }
+                        }
+                        if (!assigned) {
+                            unalignedNoValueAttrs.add(noValueAttr);
+                        }
+                    });
+                    boolean isAllEmpty = true;
+                    boolean hasSpace = false;
+                    for (int i = 0; i < randomRealization.size(); i++) {
+                        if (!randomRealization.get(i).getAttribute().isEmpty()
+                                && !randomRealization.get(i).getAttribute().equals("[]")
+                                && !randomRealization.get(i).getAttribute().equals(Action.TOKEN_PUNCT)) {
+                            isAllEmpty = false;
+                        }
+                        if (randomRealization.get(i).getAttribute().isEmpty()
+                                || randomRealization.get(i).getAttribute().equals("[]")) {
+                            hasSpace = true;
+                        }
+                    }
+                    if (isAllEmpty && hasSpace && !unalignedNoValueAttrs.isEmpty()) {
+                        unalignedNoValueAttrs.forEach((attrValue) -> {
+                            int index = getRandomGen().nextInt(randomRealization.size());
+                            boolean change = false;
+                            while (!change) {
+                                if (!randomRealization.get(index).getAttribute().equals(Action.TOKEN_PUNCT)) {
+                                    randomRealization.get(index).setAttribute(attrValue.toLowerCase().trim());
+                                    change = true;
+                                } else {
+                                    index = getRandomGen().nextInt(randomRealization.size());
+                                }
+                            }
+                        });
+                    }*/
+                    //System.out.println(isAllEmpty + " " + hasSpace + " " + unalignedNoValueAttrs);
+                    //System.out.println(">> " + noValueAttrs);
+                    //System.out.println(">> " + values);
+                    //System.out.println("0: " + randomRealization);
+                    String previousAttr = "";
+                    int start = -1;
+                    for (int i = 0; i < randomRealization.size(); i++) {
+                        if (!randomRealization.get(i).getAttribute().equals(Action.TOKEN_PUNCT)
+                                && !randomRealization.get(i).getAttribute().isEmpty()
+                                && !randomRealization.get(i).getAttribute().equals("[]")) {
+                            if (start != -1) {
+                                int middle = (start + i - 1) / 2 + 1;
+                                for (int j = start; j < middle; j++) {
+                                    if (randomRealization.get(j).getAttribute().isEmpty()
+                                            || randomRealization.get(j).getAttribute().equals("[]")) {
+                                        randomRealization.get(j).setAttribute(previousAttr);
+                                    }
+                                }
+                                for (int j = middle; j < i; j++) {
+                                    if (randomRealization.get(j).getAttribute().isEmpty()
+                                            || randomRealization.get(j).getAttribute().equals("[]")) {
+                                        randomRealization.get(j).setAttribute(randomRealization.get(i).getAttribute());
+                                    }
+                                }
+                            }
+                            start = i;
+                            previousAttr = randomRealization.get(i).getAttribute();
+                        } else {
+                            previousAttr = "";
+                        }
+                    }
+                    //System.out.println("1: " + randomRealization);
+                    previousAttr = "";
+                    for (int i = randomRealization.size() - 1; i >= 0; i--) {
+                        if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
+                            if (!previousAttr.isEmpty()) {
+                                randomRealization.get(i).setAttribute(previousAttr);
+                            }
+                        } else if (!randomRealization.get(i).getAttribute().equals(Action.TOKEN_PUNCT)) {
+                            previousAttr = randomRealization.get(i).getAttribute();
+                        } else {
+                            previousAttr = "";
+                        }
+                    }
+                    //System.out.println("2: " + randomRealization);
+                    previousAttr = "";
+                    for (int i = 0; i < randomRealization.size(); i++) {
+                        if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
+                            if (!previousAttr.isEmpty()) {
+                                randomRealization.get(i).setAttribute(previousAttr);
+                            }
+                        } else if (!randomRealization.get(i).getAttribute().equals(Action.TOKEN_PUNCT)) {
+                            previousAttr = randomRealization.get(i).getAttribute();
+                        }
+                    }
+                    //System.out.println("3: " + randomRealization);
+                    previousAttr = "";
+                    for (int i = randomRealization.size() - 1; i >= 0; i--) {
+                        if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
+                            if (!previousAttr.isEmpty()) {
+                                randomRealization.get(i).setAttribute(previousAttr);
+                            }
+                        } else if (!randomRealization.get(i).getAttribute().equals(Action.TOKEN_PUNCT)) {
+                            previousAttr = randomRealization.get(i).getAttribute();
+                        }
+                    }
+                    //System.out.println("4: " + randomRealization);
+                }
+                //FIX WRONG @PUNCT@
+                
+                String previousAttr = "";/*
+                for (int i = randomRealization.size() - 1; i >= 0; i--) {
+                    if (randomRealization.get(i).getAttribute().equals(Action.TOKEN_PUNCT) && !randomRealization.get(i).getWord().matches("[,.?!;:']")) {
+                        if (!previousAttr.isEmpty()) {
+                            randomRealization.get(i).setAttribute(previousAttr);
+                        }
+                    } else if (!randomRealization.get(i).getAttribute().equals(Action.TOKEN_PUNCT)) {
+                        previousAttr = randomRealization.get(i).getAttribute();
+                    }
+                }*/
+                ArrayList<Action> cleanRandomRealization = new ArrayList<>();
+                randomRealization.stream().filter((a) -> (!a.getAttribute().equals(Action.TOKEN_PUNCT))).forEachOrdered((a) -> {
+                    cleanRandomRealization.add(a);//no punctuation in the action (clean) 
+                });
+                //ADD END TOKENS
+                ArrayList<Action> endRandomRealization = new ArrayList<>();
+                previousAttr = "";
+                for (int i = 0; i < cleanRandomRealization.size(); i++) {
+                    Action a = cleanRandomRealization.get(i);
+                    if (!previousAttr.isEmpty()
+                            && !a.getAttribute().equals(previousAttr)) {
+                        endRandomRealization.add(new Action(Action.TOKEN_END, previousAttr));
+                    }
+                    endRandomRealization.add(a);
+                    previousAttr = a.getAttribute();
+                }
+                endRandomRealization.add(new Action(Action.TOKEN_END, previousAttr));
+                endRandomRealization.add(new Action(Action.TOKEN_END, Action.TOKEN_END));
+                calculatedRealizationsCache.put(realization, endRandomRealization);
+                //System.out.println(di.getMeaningRepresentation().getPredicate() + ": " + endRandomRealization);
+                ArrayList<String> attrValues = new ArrayList<String>();
+                endRandomRealization.forEach((a) -> {
+                    if (attrValues.isEmpty()) {
+                        attrValues.add(a.getAttribute());
+                    } else if (!attrValues.get(attrValues.size() - 1).equals(a.getAttribute())) {
+                        attrValues.add(a.getAttribute());
+                    }
+                });
+                if (attrValues.size() > getMaxContentSequenceLength()) {
+                    setMaxContentSequenceLength(attrValues.size());
+                }
+                ArrayList<Action> punctRealization = new ArrayList<>();
+                punctRealization.addAll(randomRealization);
+                previousAttr = "";
+                for (int i = 0; i < punctRealization.size(); i++) {
+                    if (!punctRealization.get(i).getAttribute().equals(Action.TOKEN_PUNCT)) {
+                        if (!punctRealization.get(i).getAttribute().equals(previousAttr)
+                                && !previousAttr.isEmpty()) {
+                            punctRealization.add(i, new Action(Action.TOKEN_END, previousAttr));
+                            i++;
+                        }
+                        previousAttr = punctRealization.get(i).getAttribute();
+                    }
+                }
+                if (!punctRealization.get(punctRealization.size() - 1).getWord().equals(Action.TOKEN_END)) {
+                    punctRealization.add(new Action(Action.TOKEN_END, previousAttr));
+                }
+                return punctRealization;
+            }).map((punctRealization) -> {
+                punctRealizations.put(di, punctRealization);
+                return punctRealization;
+            }).forEachOrdered((punctRealization) -> {
+                for (int i = 0; i < punctRealization.size(); i++) {
+                    Action a = punctRealization.get(i);
+                    if (a.getAttribute().equals(Action.TOKEN_PUNCT)) {// find punctuation surrounding actions
+                        boolean legal = true;
+                        ArrayList<Action> surroundingActions = new ArrayList<>();
+                        if (i - 2 >= 0) {
+                            surroundingActions.add(punctRealization.get(i - 2));
+                        } else {
+                            surroundingActions.add(null);
+                        }
+                        if (i - 1 >= 0) {
+                            surroundingActions.add(punctRealization.get(i - 1));
+                        } else {
+                            legal = false;
+                        }
+                        boolean oneMore = false;
+                        if (i + 1 < punctRealization.size()) {
+                            surroundingActions.add(punctRealization.get(i + 1));
+                            if (!punctRealization.get(i + 1).getAttribute().equals(Action.TOKEN_END)) {
+                                oneMore = true;
+                            }
+                        } else {
+                            legal = false;
+                        }
+                        if (oneMore && i + 2 < punctRealization.size()) {
+                            surroundingActions.add(punctRealization.get(i + 2));
+                        } else {
+                            surroundingActions.add(null);
+                        }
+                        if (legal) {
+                            if (!punctPatterns.get(di.getMeaningRepresentation().getPredicate()).containsKey(surroundingActions)) {
+                                punctPatterns.get(di.getMeaningRepresentation().getPredicate()).put(surroundingActions, new HashMap<Action, Integer>());
+                            }
+                            if (!punctPatterns.get(di.getMeaningRepresentation().getPredicate()).get(surroundingActions).containsKey(a)) {
+                                punctPatterns.get(di.getMeaningRepresentation().getPredicate()).get(surroundingActions).put(a, 1);
+                            } else {
+                                punctPatterns.get(di.getMeaningRepresentation().getPredicate()).get(surroundingActions).put(a, punctPatterns.get(di.getMeaningRepresentation().getPredicate()).get(surroundingActions).get(a) + 1);
+                            }
+                        }
+                    }
+                }
+            });
+            di.setDirectReferenceSequence(calculatedRealizationsCache.get(di.getDirectReferenceSequence()));
+            return di;
+        }).forEachOrdered((di) -> {
+        	/*
+            HashSet<String> attrValuesToBeMentioned = new HashSet<>();
+            di.getMeaningRepresentation().getAttributeValues().keySet().forEach((attribute) -> {
+                int a = 0;
+                for (String value : di.getMeaningRepresentation().getAttributeValues().get(attribute)) {
+                    if (value.startsWith("\"x")) {
+                        value = "x" + a;
+                        a++;
+                    } else if (value.startsWith("\"")) {
+                        value = value.substring(1, value.length() - 1).replaceAll(" ", "_");
+                    }
+                    attrValuesToBeMentioned.add(attribute + "=" + value);
+                }
+            });
+            di.getDirectReferenceSequence().stream().map((key) -> {
+                attrValuesToBeMentioned.remove(key.getAttribute());//not aligned in the realization
+                return key;
+            });
+            */
+        });
+        punctRealizations.keySet().forEach((di) -> {
+            ArrayList<Action> punctRealization = punctRealizations.get(di);
+            punctPatterns.get(di.getMeaningRepresentation().getPredicate()).keySet().forEach((surrounds) -> {
+                int beforeNulls = 0;
+                if (surrounds.get(0) == null) {
+                    beforeNulls++;
+                }
+                if (surrounds.get(1) == null) {
+                    beforeNulls++;
+                }
+                for (int i = 0 - beforeNulls; i < punctRealization.size(); i++) {
+                    boolean matches = true;
+                    int m = 0;
+                    for (int s = 0; s < surrounds.size(); s++) {
+                        if (surrounds.get(s) != null) {
+                            if (i + s < punctRealization.size()) {
+                                if (!punctRealization.get(i + s).getWord().equals(surrounds.get(s).getWord()) /*|| !cleanActionList.get(i).getAttribute().equals(surrounds.get(s).getAttribute())*/) {
+                                    matches = false;
+                                    s = surrounds.size();
+                                } else {
+                                    m++;
+                                }
+                            } else {
+                                matches = false;
+                                s = surrounds.size();
+                            }
+                        } else if (s < 2 && i + s >= 0) {
+                            matches = false;
+                            s = surrounds.size();
+                        } else if (s >= 2 && i + s < punctRealization.size()) {
+                            matches = false;
+                            s = surrounds.size();
+                        }
+                    }
+                    if (matches && m > 0) {
+                        Action a = new Action("", "");
+                        if (!punctPatterns.get(di.getMeaningRepresentation().getPredicate()).get(surrounds).containsKey(a)) {
+                            punctPatterns.get(di.getMeaningRepresentation().getPredicate()).get(surrounds).put(a, 1);
+                        } else {
+                            punctPatterns.get(di.getMeaningRepresentation().getPredicate()).get(surrounds).put(a, punctPatterns.get(di.getMeaningRepresentation().getPredicate()).get(surrounds).get(a) + 1);
+                        }
+                    }
+                }
+            });
+        });
+        punctPatterns.keySet().forEach((predicate) -> {
+            punctPatterns.get(predicate).keySet().forEach((punct) -> {
+                Action bestAction = null;
+                int bestCount = 0;
+                for (Action a : punctPatterns.get(predicate).get(punct).keySet()) {
+                    if (punctPatterns.get(predicate).get(punct).get(a) > bestCount) {
+                        bestAction = a;
+                        bestCount = punctPatterns.get(predicate).get(punct).get(a);
+                    } else if (punctPatterns.get(predicate).get(punct).get(a) == bestCount
+                            && bestAction.getWord().isEmpty()) {
+                        bestAction = a;
+                    }
+                }
+                if (!getPunctuationPatterns().containsKey(predicate)) {
+                    getPunctuationPatterns().put(predicate, new HashMap<ArrayList<Action>, Action>());
+                }
+                if (!bestAction.getWord().isEmpty()) {
+                    getPunctuationPatterns().get(predicate).put(punct, bestAction);
+                }
+            });
+        });
+    }
+		
+		
+	
+
+	@Override
+	public Instance createContentInstance(String predicate, String bestAction, ArrayList<String> previousGeneratedAttrs,
+			HashSet<String> attrValuesAlreadyMentioned, HashSet<String> attrValuesToBeMentioned,
+			MeaningRepresentation MR, HashMap<String, HashSet<String>> availableAttributeActions) {
+		TObjectDoubleHashMap<String> costs = new TObjectDoubleHashMap<>();
+
+        
+        if (!bestAction.isEmpty()) {
+            //COSTS
+            if (bestAction.equals(Action.TOKEN_END)) {
+                costs.put(Action.TOKEN_END, 0.0);
+                availableAttributeActions.get(predicate).forEach((action) -> {
+                    costs.put(action, 1.0);
+                });
+            } else if (!bestAction.contains("@TOK@")) {
+                costs.put(Action.TOKEN_END, 1.0);
+                availableAttributeActions.get(predicate).forEach((action) -> {
+                    String attr = bestAction;
+                    if (bestAction.contains("=")) {
+                        attr = bestAction.substring(0, bestAction.indexOf('=')).toLowerCase().trim();
+                    }
+                    if (action.equals(attr)) {
+                        costs.put(action, 0.0);
+                    } else {
+                        costs.put(action, 1.0);
+                    }
+                });
+            }
+        }
+		
+		return createContentInstanceWithCosts(predicate, costs, previousGeneratedAttrs, attrValuesAlreadyMentioned, attrValuesToBeMentioned, availableAttributeActions, MR);
+	}
+
+	@Override
+	public Instance createContentInstanceWithCosts(String predicate, TObjectDoubleHashMap<String> costs,
+			ArrayList<String> previousGeneratedAttrs, HashSet<String> attrValuesAlreadyMentioned,
+			HashSet<String> attrValuesToBeMentioned, HashMap<String, HashSet<String>> availableAttributeActions,
+			MeaningRepresentation MR) {
+		TObjectDoubleHashMap<String> generalFeatures = new TObjectDoubleHashMap<>();
+        HashMap<String, TObjectDoubleHashMap<String>> valueSpecificFeatures = new HashMap<>();
+        if (availableAttributeActions.containsKey(predicate)) {
+            availableAttributeActions.get(predicate).forEach((action) -> {
+                valueSpecificFeatures.put(action, new TObjectDoubleHashMap<String>());
+            });
+        }
+        ArrayList<String> mentionedAttrValues = new ArrayList<>();
+        previousGeneratedAttrs.stream().filter((attrValue) -> (!attrValue.equals(Action.TOKEN_START)
+                && !attrValue.equals(Action.TOKEN_END))).forEachOrdered((attrValue) -> {
+            mentionedAttrValues.add(attrValue);
+        });
+
+        for (int j = 1; j <= 1; j++) {
+            String previousAttrValue = "@@";
+            if (mentionedAttrValues.size() - j >= 0) {
+                previousAttrValue = mentionedAttrValues.get(mentionedAttrValues.size() - j).trim();
+            }
+            generalFeatures.put("feature_attrValue_" + j + "_" + previousAttrValue, 1.0);
+        }
+        //Word N-Grams
+        String prevAttrValue = "@@";
+        if (mentionedAttrValues.size() - 1 >= 0) {
+            prevAttrValue = mentionedAttrValues.get(mentionedAttrValues.size() - 1).trim();
+        }
+        String prev2AttrValue = "@@";
+        if (mentionedAttrValues.size() - 2 >= 0) {
+            prev2AttrValue = mentionedAttrValues.get(mentionedAttrValues.size() - 2).trim();
+        }
+        String prev3AttrValue = "@@";
+        if (mentionedAttrValues.size() - 3 >= 0) {
+            prev3AttrValue = mentionedAttrValues.get(mentionedAttrValues.size() - 3).trim();
+        }
+        String prev4AttrValue = "@@";
+        if (mentionedAttrValues.size() - 4 >= 0) {
+            prev4AttrValue = mentionedAttrValues.get(mentionedAttrValues.size() - 4).trim();
+        }
+        String prev5AttrValue = "@@";
+        if (mentionedAttrValues.size() - 5 >= 0) {
+            prev5AttrValue = mentionedAttrValues.get(mentionedAttrValues.size() - 5).trim();
+        }
+
+        String prevBigramAttrValue = prev2AttrValue + "|" + prevAttrValue;
+        String prevTrigramAttrValue = prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
+        String prev4gramAttrValue = prev4AttrValue + "|" + prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
+        String prev5gramAttrValue = prev5AttrValue + "|" + prev4AttrValue + "|" + prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
+        generalFeatures.put("feature_attrValue_bigram_" + prevBigramAttrValue, 1.0);
+        generalFeatures.put("feature_attrValue_trigram_" + prevTrigramAttrValue, 1.0);
+        generalFeatures.put("feature_attrValue_4gram_" + prev4gramAttrValue, 1.0);
+        generalFeatures.put("feature_attrValue_5gram_" + prev5gramAttrValue, 1.0);
+
+        //If arguments have been generated or not
+        for (int i = 0; i < mentionedAttrValues.size(); i++) {
+            generalFeatures.put("feature_attrValue_allreadyMentioned_" + mentionedAttrValues.get(i), 1.0);
+        }
+        //If arguments should still be generated or not
+        attrValuesToBeMentioned.forEach((attrValue) -> {
+            generalFeatures.put("feature_attrValue_toBeMentioned_" + attrValue, 1.0);
+        }); //Which attrs are in the MR and which are not
+
+        if (availableAttributeActions.containsKey(predicate)) {
+            availableAttributeActions.get(predicate).forEach((attribute) -> {
+                if (MR.getAttributeValues().keySet().contains(attribute)) {
+                    generalFeatures.put("feature_attr_inMR_" + attribute, 1.0);
+                } else {
+                    generalFeatures.put("feature_attr_notInMR_" + attribute, 1.0);
+                }
+            });
+        }
+
+        ArrayList<String> mentionedAttrs = new ArrayList<>();
+        for (int i = 0; i < mentionedAttrValues.size(); i++) {
+            String attr = mentionedAttrValues.get(i);
+            if (attr.contains("=")) {
+                attr = mentionedAttrValues.get(i).substring(0, mentionedAttrValues.get(i).indexOf('='));
+            }
+            mentionedAttrs.add(attr);
+        }
+        HashSet<String> attrsToBeMentioned = new HashSet<>();
+        attrValuesToBeMentioned.stream().map((attrValue) -> {
+            String attr = attrValue;
+            if (attr.contains("=")) {
+                attr = attrValue.substring(0, attrValue.indexOf('='));
+            }
+            return attr;
+        }).forEachOrdered((attr) -> {
+            attrsToBeMentioned.add(attr);
+        });
+
+        for (int j = 1; j <= 1; j++) {
+            String previousAttr = "";
+            if (mentionedAttrs.size() - j >= 0) {
+                previousAttr = mentionedAttrs.get(mentionedAttrs.size() - j).trim();
+            }
+            if (!previousAttr.isEmpty()) {
+                generalFeatures.put("feature_attr_" + j + "_" + previousAttr, 1.0);
+            } else {
+                generalFeatures.put("feature_attr_" + j + "_@@", 1.0);
+            }
+        }
+        //Word N-Grams
+        String prevAttr = "@@";
+        if (mentionedAttrs.size() - 1 >= 0) {
+            prevAttr = mentionedAttrs.get(mentionedAttrs.size() - 1).trim();
+        }
+        String prev2Attr = "@@";
+        if (mentionedAttrs.size() - 2 >= 0) {
+            prev2Attr = mentionedAttrs.get(mentionedAttrs.size() - 2).trim();
+        }
+        String prev3Attr = "@@";
+        if (mentionedAttrs.size() - 3 >= 0) {
+            prev3Attr = mentionedAttrs.get(mentionedAttrs.size() - 3).trim();
+        }
+        String prev4Attr = "@@";
+        if (mentionedAttrs.size() - 4 >= 0) {
+            prev4Attr = mentionedAttrs.get(mentionedAttrs.size() - 4).trim();
+        }
+        String prev5Attr = "@@";
+        if (mentionedAttrs.size() - 5 >= 0) {
+            prev5Attr = mentionedAttrs.get(mentionedAttrs.size() - 5).trim();
+        }
+
+        String prevBigramAttr = prev2Attr + "|" + prevAttr;
+        String prevTrigramAttr = prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        String prev4gramAttr = prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        String prev5gramAttr = prev5Attr + "|" + prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+
+        generalFeatures.put("feature_attr_bigram_" + prevBigramAttr, 1.0);
+        generalFeatures.put("feature_attr_trigram_" + prevTrigramAttr, 1.0);
+        generalFeatures.put("feature_attr_4gram_" + prev4gramAttr, 1.0);
+        generalFeatures.put("feature_attr_5gram_" + prev5gramAttr, 1.0);
+
+        //If arguments have been generated or not
+        attrValuesAlreadyMentioned.forEach((attr) -> {
+            generalFeatures.put("feature_attr_alreadyMentioned_" + attr, 1.0);
+        });
+        //If arguments should still be generated or not
+        attrsToBeMentioned.forEach((attr) -> {
+            generalFeatures.put("feature_attr_toBeMentioned_" + attr, 1.0);
+        });
+
+        //Attr specific features (and global features)
+        if (availableAttributeActions.containsKey(predicate)) {
+            for (String action : availableAttributeActions.get(predicate)) {
+                if (action.equals(Action.TOKEN_END)) {
+                    if (attrsToBeMentioned.isEmpty()) {
+                        valueSpecificFeatures.get(action).put("global_feature_specific_allAttrValuesMentioned", 1.0);
+                    } else {
+                        valueSpecificFeatures.get(action).put("global_feature_specific_allAttrValuesNotMentioned", 1.0);
+                    }
+                } else {
+                    //Is attr in MR?
+                    if (MR.getAttributeValues().get(action) != null) {
+                        valueSpecificFeatures.get(action).put("global_feature_specific_isInMR", 1.0);
+                    } else {
+                        valueSpecificFeatures.get(action).put("global_feature_specific_isNotInMR", 1.0);
+                    }
+                    //Is attr already mentioned right before
+                    if (prevAttr.equals(action)) {
+                        valueSpecificFeatures.get(action).put("global_feature_specific_attrFollowingSameAttr", 1.0);
+                    } else {
+                        valueSpecificFeatures.get(action).put("global_feature_specific_attrNotFollowingSameAttr", 1.0);
+                    }
+                    //Is attr already mentioned
+                    attrValuesAlreadyMentioned.stream().map((attrValue) -> {
+                        if (attrValue.indexOf('=') == -1) {
+                        }
+                        return attrValue;
+                    }).filter((attrValue) -> (attrValue.substring(0, attrValue.indexOf('=')).equals(action))).forEachOrdered((_item) -> {
+                        valueSpecificFeatures.get(action).put("global_feature_specific_attrAlreadyMentioned", 1.0);
+                    });
+                    //Is attr to be mentioned (has value to express)
+                    boolean toBeMentioned = false;
+                    for (String attrValue : attrValuesToBeMentioned) {
+                        if (attrValue.substring(0, attrValue.indexOf('=')).equals(action)) {
+                            toBeMentioned = true;
+                            valueSpecificFeatures.get(action).put("global_feature_specific_attrToBeMentioned", 1.0);
+                        }
+                    }
+                    if (!toBeMentioned) {
+                        valueSpecificFeatures.get(action).put("global_feature_specific_attrNotToBeMentioned", 1.0);
+                    }
+                }
+                HashSet<String> keys = new HashSet<>(valueSpecificFeatures.get(action).keySet());
+                keys.forEach((feature1) -> {
+                    keys.stream().filter((feature2) -> (valueSpecificFeatures.get(action).get(feature1) == 1.0
+                            && valueSpecificFeatures.get(action).get(feature2) == 1.0
+                            && feature1.compareTo(feature2) < 0)).forEachOrdered((feature2) -> {
+                        valueSpecificFeatures.get(action).put(feature1 + "&&" + feature2, 1.0);
+                    });
+                });
+
+                String nextValue = chooseNextValue(action, attrValuesToBeMentioned);
+                if (nextValue.isEmpty() && !action.equals(Action.TOKEN_END)) {
+                    valueSpecificFeatures.get(action).put("global_feature_LMAttr_score", 0.0);
+                } else {
+                    ArrayList<String> fullGramLM = new ArrayList<>();
+                    for (int i = 0; i < mentionedAttrValues.size(); i++) {
+                        fullGramLM.add(mentionedAttrValues.get(i));
+                    }
+                    ArrayList<String> prev5attrValueGramLM = new ArrayList<>();
+                    int j = 0;
+                    for (int i = mentionedAttrValues.size() - 1; (i >= 0 && j < 5); i--) {
+                        prev5attrValueGramLM.add(0, mentionedAttrValues.get(i));
+                        j++;
+                    }
+                    if (!action.equals(Action.TOKEN_END)) {
+                        prev5attrValueGramLM.add(action + "=" + chooseNextValue(action, attrValuesToBeMentioned));
+                    } else {
+                        prev5attrValueGramLM.add(action);
+                    }
+                    while (prev5attrValueGramLM.size() < 4) {
+                        prev5attrValueGramLM.add(0, "@@");
+                    }
+
+                    double afterLMScore = getContentLMsPerPredicate().get(predicate).getProbability(prev5attrValueGramLM);
+                    valueSpecificFeatures.get(action).put("global_feature_LMAttr_score", afterLMScore);
+
+                    afterLMScore = getContentLMsPerPredicate().get(predicate).getProbability(fullGramLM);
+                    valueSpecificFeatures.get(action).put("global_feature_LMAttrFull_score", afterLMScore);
+                }
+            }
+        }
+        return new Instance(generalFeatures, valueSpecificFeatures, costs);
+		
+
+	}
+
+	@Override
+	public Instance createWordInstance(String predicate, Action bestAction,
+			ArrayList<String> previousGeneratedAttributes, ArrayList<Action> previousGeneratedWords,
+			ArrayList<String> nextGeneratedAttributes, HashSet<String> attrValuesAlreadyMentioned,
+			HashSet<String> attrValuesThatFollow, boolean wasValueMentioned,
+			HashMap<String, HashSet<Action>> availableWordActions) {
+		TObjectDoubleHashMap<String> costs = new TObjectDoubleHashMap<>();
+        if (!bestAction.getWord().trim().isEmpty()) {
+            //COSTS
+            String attr = bestAction.getAttribute();
+            if (bestAction.getAttribute().contains("=")) {
+                attr = bestAction.getAttribute().substring(0, bestAction.getAttribute().indexOf('='));
+            }
+            if(!availableWordActions.containsKey(attr)){
+            	System.out.println(attr);
+            }
+            for (Action action : availableWordActions.get(attr)) {
+                if (action.getWord().equalsIgnoreCase(bestAction.getWord().trim())) {
+                    costs.put(action.getAction(), 0.0);
+                } else {
+                    costs.put(action.getAction(), 1.0);
+                }
+            }
+
+            if (bestAction.getWord().trim().equalsIgnoreCase(Action.TOKEN_END)) {
+                costs.put(Action.TOKEN_END, 0.0);
+            } else {
+                costs.put(Action.TOKEN_END, 1.0);
+            }
+        }
+		
+        return createWordInstanceWithCosts(predicate, bestAction.getAttribute(), costs, 
+        		previousGeneratedAttributes, previousGeneratedWords, nextGeneratedAttributes, 
+        		attrValuesAlreadyMentioned, attrValuesThatFollow, wasValueMentioned, availableWordActions);
+	}
+
+	@Override
+	public Instance createWordInstanceWithCosts(String predicate, String currentAttrValue,
+			TObjectDoubleHashMap<String> costs, ArrayList<String> generatedAttributes,
+			ArrayList<Action> previousGeneratedWords, ArrayList<String> nextGeneratedAttributes,
+			HashSet<String> attrValuesAlreadyMentioned, HashSet<String> attrValuesThatFollow, boolean wasValueMentioned,
+			HashMap<String, HashSet<Action>> availableWordActions) {
+		String currentAttr = currentAttrValue;
+        String currentValue = "";
+        if (currentAttr.contains("=")) {
+            currentAttr = currentAttrValue.substring(0, currentAttrValue.indexOf('='));
+            currentValue = currentAttrValue.substring(currentAttrValue.indexOf('=') + 1);
+        }
+        TObjectDoubleHashMap<String> generalFeatures = new TObjectDoubleHashMap<>();
+        HashMap<String, TObjectDoubleHashMap<String>> valueSpecificFeatures = new HashMap<>();
+        for (Action action : availableWordActions.get(currentAttr)) {
+            valueSpecificFeatures.put(action.getAction(), new TObjectDoubleHashMap<String>());
+        }
+        ArrayList<Action> generatedWords = new ArrayList<>();
+        ArrayList<Action> generatedWordsInSameAttrValue = new ArrayList<>();
+        ArrayList<String> generatedPhrase = new ArrayList<>();
+        for (int i = 0; i < previousGeneratedWords.size(); i++) {
+            Action a = previousGeneratedWords.get(i);
+            if (!a.getWord().equals(Action.TOKEN_START)
+                    && !a.getWord().equals(Action.TOKEN_END)) {
+                generatedWords.add(a);
+                generatedPhrase.add(a.getWord());
+                if (a.getAttribute().equals(currentAttrValue)) {
+                    generatedWordsInSameAttrValue.add(a);
+                }
+            }
+        }
+      //Previous word features
+        for (int j = 1; j <= 1; j++) {
+            String previousWord = "@@";
+            if (generatedWords.size() - j >= 0) {
+                previousWord = generatedWords.get(generatedWords.size() - j).getWord().trim();
+            }
+            generalFeatures.put("feature_word_" + j + "_" + previousWord.toLowerCase(), 1.0);
+        }
+        String prevWord = "@@";
+        if (generatedWords.size() - 1 >= 0) {
+            prevWord = generatedWords.get(generatedWords.size() - 1).getWord().trim();
+        }
+        String prev2Word = "@@";
+        if (generatedWords.size() - 2 >= 0) {
+            prev2Word = generatedWords.get(generatedWords.size() - 2).getWord().trim();
+        }
+        String prev3Word = "@@";
+        if (generatedWords.size() - 3 >= 0) {
+            prev3Word = generatedWords.get(generatedWords.size() - 3).getWord().trim();
+        }
+        String prev4Word = "@@";
+        if (generatedWords.size() - 4 >= 0) {
+            prev4Word = generatedWords.get(generatedWords.size() - 4).getWord().trim();
+        }
+        String prev5Word = "@@";
+        if (generatedWords.size() - 5 >= 0) {
+            prev5Word = generatedWords.get(generatedWords.size() - 5).getWord().trim();
+        }
+
+        String prevBigram = prev2Word + "|" + prevWord;
+        String prevTrigram = prev3Word + "|" + prev2Word + "|" + prevWord;
+        String prev4gram = prev4Word + "|" + prev3Word + "|" + prev2Word + "|" + prevWord;
+        String prev5gram = prev5Word + "|" + prev4Word + "|" + prev3Word + "|" + prev2Word + "|" + prevWord;
+
+        generalFeatures.put("feature_word_bigram_" + prevBigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_word_trigram_" + prevTrigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_word_4gram_" + prev4gram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_word_5gram_" + prev5gram.toLowerCase(), 1.0);
+        
+      //Previous Attr|Word features
+        for (int j = 1; j <= 1; j++) {
+            String previousAttrWord = "@@";
+            if (generatedWords.size() - j >= 0) {
+                if (generatedWords.get(generatedWords.size() - j).getAttribute().contains("=")) {
+                    previousAttrWord = generatedWords.get(generatedWords.size() - j).getAttribute().trim().substring(0, generatedWords.get(generatedWords.size() - j).getAttribute().indexOf('=')) + "|" + generatedWords.get(generatedWords.size() - j).getWord().trim();
+                } else {
+                    previousAttrWord = generatedWords.get(generatedWords.size() - j).getAttribute().trim() + "|" + generatedWords.get(generatedWords.size() - j).getWord().trim();
+                }
+            }
+            generalFeatures.put("feature_attrWord_" + j + "_" + previousAttrWord.toLowerCase(), 1.0);
+        }
+        String prevAttrWord = "@@";
+        if (generatedWords.size() - 1 >= 0) {
+            if (generatedWords.get(generatedWords.size() - 1).getAttribute().contains("=")) {
+                prevAttrWord = generatedWords.get(generatedWords.size() - 1).getAttribute().trim().substring(0, generatedWords.get(generatedWords.size() - 1).getAttribute().indexOf('=')) + ":" + generatedWords.get(generatedWords.size() - 1).getWord().trim();
+            } else {
+                prevAttrWord = generatedWords.get(generatedWords.size() - 1).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 1).getWord().trim();
+
+            }
+        }
+        String prev2AttrWord = "@@";
+        if (generatedWords.size() - 2 >= 0) {
+            if (generatedWords.get(generatedWords.size() - 2).getAttribute().contains("=")) {
+                prev2AttrWord = generatedWords.get(generatedWords.size() - 2).getAttribute().trim().substring(0, generatedWords.get(generatedWords.size() - 2).getAttribute().indexOf('=')) + ":" + generatedWords.get(generatedWords.size() - 2).getWord().trim();
+            } else {
+                prev2AttrWord = generatedWords.get(generatedWords.size() - 2).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 2).getWord().trim();
+            }
+        }
+        String prev3AttrWord = "@@";
+        if (generatedWords.size() - 3 >= 0) {
+            if (generatedWords.get(generatedWords.size() - 3).getAttribute().contains("=")) {
+                prev3AttrWord = generatedWords.get(generatedWords.size() - 3).getAttribute().trim().substring(0, generatedWords.get(generatedWords.size() - 3).getAttribute().indexOf('=')) + ":" + generatedWords.get(generatedWords.size() - 3).getWord().trim();
+            } else {
+                prev3AttrWord = generatedWords.get(generatedWords.size() - 3).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 3).getWord().trim();
+            }
+        }
+        String prev4AttrWord = "@@";
+        if (generatedWords.size() - 4 >= 0) {
+            if (generatedWords.get(generatedWords.size() - 4).getAttribute().contains("=")) {
+                prev4AttrWord = generatedWords.get(generatedWords.size() - 4).getAttribute().trim().substring(0, generatedWords.get(generatedWords.size() - 4).getAttribute().indexOf('=')) + ":" + generatedWords.get(generatedWords.size() - 4).getWord().trim();
+            } else {
+                prev4AttrWord = generatedWords.get(generatedWords.size() - 4).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 4).getWord().trim();
+            }
+        }
+        String prev5AttrWord = "@@";
+        if (generatedWords.size() - 5 >= 0) {
+            if (generatedWords.get(generatedWords.size() - 5).getAttribute().contains("=")) {
+                prev5AttrWord = generatedWords.get(generatedWords.size() - 5).getAttribute().trim().substring(0, generatedWords.get(generatedWords.size() - 5).getAttribute().indexOf('=')) + ":" + generatedWords.get(generatedWords.size() - 5).getWord().trim();
+            } else {
+                prev5AttrWord = generatedWords.get(generatedWords.size() - 5).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 5).getWord().trim();
+            }
+        }
+
+        String prevAttrWordBigram = prev2AttrWord + "|" + prevAttrWord;
+        String prevAttrWordTrigram = prev3AttrWord + "|" + prev2AttrWord + "|" + prevAttrWord;
+        String prevAttrWord4gram = prev4AttrWord + "|" + prev3AttrWord + "|" + prev2AttrWord + "|" + prevAttrWord;
+        String prevAttrWord5gram = prev5AttrWord + "|" + prev4AttrWord + "|" + prev3AttrWord + "|" + prev2AttrWord + "|" + prevAttrWord;
+
+        generalFeatures.put("feature_attrWord_bigram_" + prevAttrWordBigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrWord_trigram_" + prevAttrWordTrigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrWord_4gram_" + prevAttrWord4gram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrWord_5gram_" + prevAttrWord5gram.toLowerCase(), 1.0);
+        
+      //Previous AttrValue|Word features
+        for (int j = 1; j <= 1; j++) {
+            String previousAttrWord = "@@";
+            if (generatedWords.size() - j >= 0) {
+                previousAttrWord = generatedWords.get(generatedWords.size() - j).getAttribute().trim() + "|" + generatedWords.get(generatedWords.size() - j).getWord().trim();
+            }
+            generalFeatures.put("feature_attrValueWord_" + j + "_" + previousAttrWord.toLowerCase(), 1.0);
+        }
+        String prevAttrValueWord = "@@";
+        if (generatedWords.size() - 1 >= 0) {
+            prevAttrValueWord = generatedWords.get(generatedWords.size() - 1).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 1).getWord().trim();
+        }
+        String prev2AttrValueWord = "@@";
+        if (generatedWords.size() - 2 >= 0) {
+            prev2AttrValueWord = generatedWords.get(generatedWords.size() - 2).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 2).getWord().trim();
+        }
+        String prev3AttrValueWord = "@@";
+        if (generatedWords.size() - 3 >= 0) {
+            prev3AttrValueWord = generatedWords.get(generatedWords.size() - 3).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 3).getWord().trim();
+        }
+        String prev4AttrValueWord = "@@";
+        if (generatedWords.size() - 4 >= 0) {
+            prev4AttrValueWord = generatedWords.get(generatedWords.size() - 4).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 4).getWord().trim();
+        }
+        String prev5AttrValueWord = "@@";
+        if (generatedWords.size() - 5 >= 0) {
+            prev5AttrValueWord = generatedWords.get(generatedWords.size() - 5).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 5).getWord().trim();
+        }
+
+        String prevAttrValueWordBigram = prev2AttrValueWord + "|" + prevAttrValueWord;
+        String prevAttrValueWordTrigram = prev3AttrValueWord + "|" + prev2AttrValueWord + "|" + prevAttrValueWord;
+        String prevAttrValueWord4gram = prev4AttrValueWord + "|" + prev3AttrValueWord + "|" + prev2AttrValueWord + "|" + prevAttrValueWord;
+        String prevAttrValueWord5gram = prev5AttrValueWord + "|" + prev4AttrValueWord + "|" + prev3AttrValueWord + "|" + prev2AttrValueWord + "|" + prevAttrValueWord;
+
+        generalFeatures.put("feature_attrValueWord_bigram_" + prevAttrValueWordBigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrValueWord_trigram_" + prevAttrValueWordTrigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrValueWord_4gram_" + prevAttrValueWord4gram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrValueWord_5gram_" + prevAttrValueWord5gram.toLowerCase(), 1.0);
+
+      //Previous attrValue features
+        int attributeSize = generatedAttributes.size();
+        for (int j = 1; j <= 1; j++) {
+            String previousAttrValue = "@@";
+            if (attributeSize - j >= 0) {
+                previousAttrValue = generatedAttributes.get(attributeSize - j).trim();
+            }
+            generalFeatures.put("feature_attrValue_" + j + "_" + previousAttrValue, 1.0);
+        }
+        String prevAttrValue = "@@";
+        if (attributeSize - 1 >= 0) {
+            prevAttrValue = generatedAttributes.get(attributeSize - 1).trim();
+        }
+        String prev2AttrValue = "@@";
+        if (attributeSize - 2 >= 0) {
+            prev2AttrValue = generatedAttributes.get(attributeSize - 2).trim();
+        }
+        String prev3AttrValue = "@@";
+        if (attributeSize - 3 >= 0) {
+            prev3AttrValue = generatedAttributes.get(attributeSize - 3).trim();
+        }
+        String prev4AttrValue = "@@";
+        if (attributeSize - 4 >= 0) {
+            prev4AttrValue = generatedAttributes.get(attributeSize - 4).trim();
+        }
+        String prev5AttrValue = "@@";
+        if (attributeSize - 5 >= 0) {
+            prev5AttrValue = generatedAttributes.get(attributeSize - 5).trim();
+        }
+
+        String prevAttrBigramValue = prev2AttrValue + "|" + prevAttrValue;
+        String prevAttrTrigramValue = prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
+        String prevAttr4gramValue = prev4AttrValue + "|" + prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
+        String prevAttr5gramValue = prev5AttrValue + "|" + prev4AttrValue + "|" + prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
+
+        generalFeatures.put("feature_attrValue_bigram_" + prevAttrBigramValue.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrValue_trigram_" + prevAttrTrigramValue.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrValue_4gram_" + prevAttr4gramValue.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attrValue_5gram_" + prevAttr5gramValue.toLowerCase(), 1.0);
+
+      //Previous attr features
+        for (int j = 1; j <= 1; j++) {
+            String previousAttr = "@@";
+            if (attributeSize - j >= 0) {
+                if (generatedAttributes.get(attributeSize - j).contains("=")) {
+                    previousAttr = generatedAttributes.get(attributeSize - j).trim().substring(0, generatedAttributes.get(attributeSize - j).indexOf('='));
+                } else {
+                    previousAttr = generatedAttributes.get(attributeSize - j).trim();
+                }
+            }
+            generalFeatures.put("feature_attr_" + j + "_" + previousAttr, 1.0);
+        }
+        String prevAttr = "@@";
+        if (attributeSize - 1 >= 0) {
+            if (generatedAttributes.get(attributeSize - 1).contains("=")) {
+                prevAttr = generatedAttributes.get(attributeSize - 1).trim().substring(0, generatedAttributes.get(attributeSize - 1).indexOf('='));
+            } else {
+                prevAttr = generatedAttributes.get(attributeSize - 1).trim();
+            }
+        }
+        String prev2Attr = "@@";
+        if (attributeSize - 2 >= 0) {
+            if (generatedAttributes.get(attributeSize - 2).contains("=")) {
+                prev2Attr = generatedAttributes.get(attributeSize - 2).trim().substring(0, generatedAttributes.get(attributeSize - 2).indexOf('='));
+            } else {
+                prev2Attr = generatedAttributes.get(attributeSize - 2).trim();
+            }
+        }
+        String prev3Attr = "@@";
+        if (attributeSize - 3 >= 0) {
+            if (generatedAttributes.get(attributeSize - 3).contains("=")) {
+                prev3Attr = generatedAttributes.get(attributeSize - 3).trim().substring(0, generatedAttributes.get(attributeSize - 3).indexOf('='));
+            } else {
+                prev3Attr = generatedAttributes.get(attributeSize - 3).trim();
+            }
+        }
+        String prev4Attr = "@@";
+        if (attributeSize - 4 >= 0) {
+            if (generatedAttributes.get(attributeSize - 4).contains("=")) {
+                prev4Attr = generatedAttributes.get(attributeSize - 4).trim().substring(0, generatedAttributes.get(attributeSize - 4).indexOf('='));
+            } else {
+                prev4Attr = generatedAttributes.get(attributeSize - 4).trim();
+            }
+        }
+        String prev5Attr = "@@";
+        if (attributeSize - 5 >= 0) {
+            if (generatedAttributes.get(attributeSize - 5).contains("=")) {
+                prev5Attr = generatedAttributes.get(attributeSize - 5).trim().substring(0, generatedAttributes.get(attributeSize - 5).indexOf('='));
+            } else {
+                prev5Attr = generatedAttributes.get(attributeSize - 5).trim();
+            }
+        }
+
+        String prevAttrBigram = prev2Attr + "|" + prevAttr;
+        String prevAttrTrigram = prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        String prevAttr4gram = prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        String prevAttr5gram = prev5Attr + "|" + prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+
+        generalFeatures.put("feature_attr_bigram_" + prevAttrBigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attr_trigram_" + prevAttrTrigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attr_4gram_" + prevAttr4gram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_attr_5gram_" + prevAttr5gram.toLowerCase(), 1.0);
+        
+      //Next attr features
+        for (int j = 0; j < 1; j++) {
+            String nextAttr = "@@";
+            if (j < nextGeneratedAttributes.size()) {
+                if (nextGeneratedAttributes.get(j).contains("=")) {
+                    nextAttr = nextGeneratedAttributes.get(j).trim().substring(0, nextGeneratedAttributes.get(j).indexOf('='));
+                } else {
+                    nextAttr = nextGeneratedAttributes.get(j).trim();
+                }
+            }
+            generalFeatures.put("feature_nextAttr_" + j + "_" + nextAttr, 1.0);
+        }
+        String nextAttr = "@@";
+        if (0 < nextGeneratedAttributes.size()) {
+            if (nextGeneratedAttributes.get(0).contains("=")) {
+                nextAttr = nextGeneratedAttributes.get(0).trim().substring(0, nextGeneratedAttributes.get(0).indexOf('='));
+            } else {
+                nextAttr = nextGeneratedAttributes.get(0).trim();
+            }
+        }
+        String next2Attr = "@@";
+        if (1 < nextGeneratedAttributes.size()) {
+            if (nextGeneratedAttributes.get(1).contains("=")) {
+                next2Attr = nextGeneratedAttributes.get(1).trim().substring(0, nextGeneratedAttributes.get(1).indexOf('='));
+            } else {
+                next2Attr = nextGeneratedAttributes.get(1).trim();
+            }
+        }
+        String next3Attr = "@@";
+        if (2 < nextGeneratedAttributes.size()) {
+            if (nextGeneratedAttributes.get(2).contains("=")) {
+                next3Attr = nextGeneratedAttributes.get(2).trim().substring(0, nextGeneratedAttributes.get(2).indexOf('='));
+            } else {
+                next3Attr = nextGeneratedAttributes.get(2).trim();
+            }
+        }
+        String next4Attr = "@@";
+        if (3 < nextGeneratedAttributes.size()) {
+            if (nextGeneratedAttributes.get(3).contains("=")) {
+                next4Attr = nextGeneratedAttributes.get(3).trim().substring(0, nextGeneratedAttributes.get(3).indexOf('='));
+            } else {
+                next4Attr = nextGeneratedAttributes.get(3).trim();
+            }
+        }
+        String next5Attr = "@@";
+        if (4 < nextGeneratedAttributes.size()) {
+            if (nextGeneratedAttributes.get(4).contains("=")) {
+                next5Attr = nextGeneratedAttributes.get(4).trim().substring(0, nextGeneratedAttributes.get(4).indexOf('='));
+            } else {
+                next5Attr = nextGeneratedAttributes.get(4).trim();
+            }
+        }
+
+        String nextAttrBigram = nextAttr + "|" + next2Attr;
+        String nextAttrTrigram = nextAttr + "|" + next2Attr + "|" + next3Attr;
+        String nextAttr4gram = nextAttr + "|" + next2Attr + "|" + next3Attr + "|" + next4Attr;
+        String nextAttr5gram = nextAttr + "|" + next2Attr + "|" + next3Attr + "|" + next4Attr + "|" + next5Attr;
+
+        generalFeatures.put("feature_nextAttr_bigram_" + nextAttrBigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_nextAttr_trigram_" + nextAttrTrigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_nextAttr_4gram_" + nextAttr4gram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_nextAttr_5gram_" + nextAttr5gram.toLowerCase(), 1.0);
+
+      //Next attrValue features
+        for (int j = 0; j < 1; j++) {
+            String nextAttrValue = "@@";
+            if (j < nextGeneratedAttributes.size()) {
+                nextAttrValue = nextGeneratedAttributes.get(j).trim();
+            }
+            generalFeatures.put("feature_nextAttrValue_" + j + "_" + nextAttrValue, 1.0);
+        }
+        String nextAttrValue = "@@";
+        if (0 < nextGeneratedAttributes.size()) {
+            nextAttrValue = nextGeneratedAttributes.get(0).trim();
+        }
+        String next2AttrValue = "@@";
+        if (1 < nextGeneratedAttributes.size()) {
+            next2AttrValue = nextGeneratedAttributes.get(1).trim();
+        }
+        String next3AttrValue = "@@";
+        if (2 < nextGeneratedAttributes.size()) {
+            next3AttrValue = nextGeneratedAttributes.get(2).trim();
+        }
+        String next4AttrValue = "@@";
+        if (3 < nextGeneratedAttributes.size()) {
+            next4AttrValue = nextGeneratedAttributes.get(3).trim();
+        }
+        String next5AttrValue = "@@";
+        if (4 < nextGeneratedAttributes.size()) {
+            next5AttrValue = nextGeneratedAttributes.get(4).trim();
+        }
+
+        String nextAttrValueBigram = nextAttrValue + "|" + next2AttrValue;
+        String nextAttrValueTrigram = nextAttrValue + "|" + next2AttrValue + "|" + next3AttrValue;
+        String nextAttrValue4gram = nextAttrValue + "|" + next2AttrValue + "|" + next3AttrValue + "|" + next4AttrValue;
+        String nextAttrValue5gram = nextAttrValue + "|" + next2AttrValue + "|" + next3AttrValue + "|" + next4AttrValue + "|" + next5AttrValue;
+
+        generalFeatures.put("feature_nextAttrValue_bigram_" + nextAttrValueBigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_nextAttrValue_trigram_" + nextAttrValueTrigram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_nextAttrValue_4gram_" + nextAttrValue4gram.toLowerCase(), 1.0);
+        generalFeatures.put("feature_nextAttrValue_5gram_" + nextAttrValue5gram.toLowerCase(), 1.0);
+
+      //If values have already been generated or not
+        generalFeatures.put("feature_valueToBeMentioned_" + currentValue.toLowerCase(), 1.0);
+        if (wasValueMentioned) {
+            generalFeatures.put("feature_wasValueMentioned_true", 1.0);
+        } else {
+            //generalFeatures.put("feature_wasValueMentioned_false", 1.0);
+        }
+        HashSet<String> valuesThatFollow = new HashSet<>();
+        attrValuesThatFollow.stream().map((attrValue) -> {
+            generalFeatures.put("feature_attrValuesThatFollow_" + attrValue.toLowerCase(), 1.0);
+            return attrValue;
+        }).forEachOrdered((attrValue) -> {
+            if (attrValue.contains("=")) {
+                String v = attrValue.substring(attrValue.indexOf('=') + 1);
+                if (v.matches("[xX][0-9]+")) {
+                    String attr = attrValue.substring(0, attrValue.indexOf('='));
+                    valuesThatFollow.add(Action.TOKEN_X + attr + "_" + v.substring(1));
+                } else {
+                    valuesThatFollow.add(v);
+                }
+                generalFeatures.put("feature_attrsThatFollow_" + attrValue.substring(0, attrValue.indexOf('=')).toLowerCase(), 1.0);
+            } else {
+                generalFeatures.put("feature_attrsThatFollow_" + attrValue.toLowerCase(), 1.0);
+            }
+        });
+        if (valuesThatFollow.isEmpty()) {
+            generalFeatures.put("feature_noAttrsFollow", 1.0);
+        } else {
+            generalFeatures.put("feature_noAttrsFollow", 0.0);
+        }
+        HashSet<String> mentionedValues = new HashSet<>();
+        attrValuesAlreadyMentioned.stream().map((attrValue) -> {
+            generalFeatures.put("feature_attrValuesAlreadyMentioned_" + attrValue.toLowerCase(), 1.0);
+            return attrValue;
+        }).forEachOrdered((attrValue) -> {
+            if (attrValue.contains("=")) {
+                generalFeatures.put("feature_attrsAlreadyMentioned_" + attrValue.substring(0, attrValue.indexOf('=')).toLowerCase(), 1.0);
+                String v = attrValue.substring(attrValue.indexOf('=') + 1);
+                if (v.matches("[xX][0-9]+")) {
+                    String attr = attrValue.substring(0, attrValue.indexOf('='));
+                    mentionedValues.add(Action.TOKEN_X + attr + "_" + v.substring(1));
+                } else {
+                    mentionedValues.add(v);
+                }
+            } else {
+                generalFeatures.put("feature_attrsAlreadyMentioned_" + attrValue.toLowerCase(), 1.0);
+            }
+        });
+      //Word specific features (and also global features)
+        for (Action action : availableWordActions.get(currentAttr)) {
+            //Is word same as previous word
+            if (prevWord.equals(action.getWord())) {
+                //valueSpecificFeatures.get(action.getAction()).put("feature_specific_sameAsPreviousWord", 1.0);
+                valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_sameAsPreviousWord", 1.0);
+            } else {
+                //valueSpecificFeatures.get(action.getAction()).put("feature_specific_notSameAsPreviousWord", 1.0);
+                valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_notSameAsPreviousWord", 1.0);
+            }
+            //Has word appeared in the same attrValue before
+            generatedWords.forEach((previousAction) -> {
+                if (previousAction.getWord().equals(action.getWord())
+                        && previousAction.getAttribute().equals(currentAttrValue)) {
+                    //valueSpecificFeatures.get(action.getAction()).put("feature_specific_appearedInSameAttrValue", 1.0);
+                    valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_appearedInSameAttrValue", 1.0);
+                } else {
+                    //valueSpecificFeatures.get(action.getAction()).put("feature_specific_notAppearedInSameAttrValue", 1.0);
+                    //valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_notAppearedInSameAttrValue", 1.0);
+                }
+            });
+            //Has word appeared before
+            generatedWords.forEach((previousAction) -> {
+                if (previousAction.getWord().equals(action.getWord())) {
+                    //valueSpecificFeatures.get(action.getAction()).put("feature_specific_appeared", 1.0);
+                    valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_appeared", 1.0);
+                } else {
+                    //valueSpecificFeatures.get(action.getAction()).put("feature_specific_notAppeared", 1.0);
+                    //valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_notAppeared", 1.0);
+                }
+            });
+            if (currentValue.equals("no")
+                    || currentValue.equals("yes")
+                    || currentValue.equals("yes or no")
+                    || currentValue.equals("none")
+                    || currentValue.equals("empty") //|| currentValue.equals("dont_care")
+                    ) {
+                //valueSpecificFeatures.get(action.getAction()).put("feature_specific_emptyValue", 1.0);
+                valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_emptyValue", 1.0);
+            } else {
+                //valueSpecificFeatures.get(action.getAction()).put("feature_specific_notEmptyValue", 1.0);
+                //valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_notEmptyValue", 1.0);
+            }
+
+            HashSet<String> keys = new HashSet<>(valueSpecificFeatures.get(action.getAction()).keySet());
+            keys.forEach((feature1) -> {
+                keys.stream().filter((feature2) -> (valueSpecificFeatures.get(action.getAction()).get(feature1) == 1.0
+                        && valueSpecificFeatures.get(action.getAction()).get(feature2) == 1.0
+                        && feature1.compareTo(feature2) < 0)).forEachOrdered((feature2) -> {
+                    valueSpecificFeatures.get(action.getAction()).put(feature1 + "&&" + feature2, 1.0);
+                });
+            });
+
+            if (!action.getWord().startsWith(Action.TOKEN_X)
+                    && !currentValue.equals("no")
+                    && !currentValue.equals("yes")
+                    && !currentValue.equals("yes or no")
+                    && !currentValue.equals("none")
+                    && !currentValue.equals("empty") //&& !currentValue.equals("dont_care")
+                    ) {
+                for (String value : getValueAlignments().keySet()) {
+                    for (ArrayList<String> alignedStr : getValueAlignments().get(value).keySet()) {
+                        if (alignedStr.get(0).equals(action.getWord())) {
+                            if (mentionedValues.contains(value)) {
+                                //valueSpecificFeatures.get(action.getAction()).put("feature_specific_beginsValue_alreadyMentioned", 1.0);
+                                valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_beginsValue_alreadyMentioned", 1.0);
+
+                            } else if (currentValue.equals(value)) {
+                                //valueSpecificFeatures.get(action.getAction()).put("feature_specific_beginsValue_current", 1.0);
+                                valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_beginsValue_current", 1.0);
+
+                            } else if (valuesThatFollow.contains(value)) {
+                                //valueSpecificFeatures.get(action.getAction()).put("feature_specific_beginsValue_thatFollows", 1.0);
+                                valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_beginsValue_thatFollows", 1.0);
+
+                            } else {
+                                //valueSpecificFeatures.get(action.getAction()).put("feature_specific_beginsValue_notInMR", 1.0);
+                                valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_beginsValue_notInMR", 1.0);
+
+                            }
+                        } else {
+                            for (int i = 1; i < alignedStr.size(); i++) {
+                                if (alignedStr.get(i).equals(action.getWord())) {
+                                    if (endsWith(generatedPhrase, new ArrayList<String>(alignedStr.subList(0, i + 1)))) {
+                                        if (mentionedValues.contains(value)) {
+                                            //valueSpecificFeatures.get(action.getAction()).put("feature_specific_inValue_alreadyMentioned", 1.0);
+                                            valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_inValue_alreadyMentioned", 1.0);
+
+                                        } else if (currentValue.equals(value)) {
+                                            //valueSpecificFeatures.get(action.getAction()).put("feature_specific_inValue_current", 1.0);
+                                            valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_inValue_current", 1.0);
+
+                                        } else if (valuesThatFollow.contains(value)) {
+                                            //valueSpecificFeatures.get(action.getAction()).put("feature_specific_inValue_thatFollows", 1.0);
+                                            valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_inValue_thatFollows", 1.0);
+
+                                        } else {
+                                            //valueSpecificFeatures.get(action.getAction()).put("feature_specific_inValue_notInMR", 1.0);
+                                            valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_inValue_notInMR", 1.0);
+
+                                        }
+                                    } else {
+                                        /*if (mentionedValues.contains(value)) {
+                                        valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue_alreadyMentioned", 1.0);
+                                        } else if (currentValue.equals(value)) {
+                                        valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue_current", 1.0);
+                                        } else if (valuesThatFollow.contains(value)) {
+                                        valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue_thatFollows", 1.0);
+                                        } else {
+                                        valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue_notInMR", 1.0);
+                                        }*/
+                                        //valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue", 1.0);
+                                        valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_outOfValue", 1.0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (action.getWord().equals(Action.TOKEN_END)) {
+                    if (generatedWordsInSameAttrValue.isEmpty()) {
+                        //valueSpecificFeatures.get(action.getAction()).put("feature_specific_closingEmptyAttr", 1.0);
+                        valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_closingEmptyAttr", 1.0);
+                    }
+                    if (!wasValueMentioned) {
+                        //valueSpecificFeatures.get(action.getAction()).put("feature_specific_closingAttrWithValueNotMentioned", 1.0);
+                        valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_closingAttrWithValueNotMentioned", 1.0);
+                    }
+
+                    // if (!prevCurrentAttrValueWord.equals("@@")) {
+                    if (!prevWord.equals("@@")) {
+                        boolean alignmentIsOpen = false;
+                        for (String value : getValueAlignments().keySet()) {
+                            for (ArrayList<String> alignedStr : getValueAlignments().get(value).keySet()) {
+                                for (int i = 0; i < alignedStr.size() - 1; i++) {
+                                    if (alignedStr.get(i).equals(prevWord)
+                                            && endsWith(generatedPhrase, new ArrayList<>(alignedStr.subList(0, i + 1)))) {
+                                        alignmentIsOpen = true;
+                                    }
+                                }
+                            }
+                        }
+                        if (alignmentIsOpen) {
+                            // valueSpecificFeatures.get(action.getAction()).put("feature_specific_closingAttrWhileValueIsNotConcluded", 1.0);
+                            valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_closingAttrWhileValueIsNotConcluded", 1.0);
+                        }
+                    }
+                }
+            } else if (currentValue.equals("no")
+                    || currentValue.equals("yes")
+                    || currentValue.equals("yes or no")
+                    || currentValue.equals("none")
+                    || currentValue.equals("empty") //|| currentValue.equals("dont_care")
+                    ) {
+                valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_XValue_notInMR", 1.0);
+            } else {
+                String currentValueVariant = "";
+                if (currentValue.matches("[xX][0-9]+")) {
+                    currentValueVariant = Action.TOKEN_X + currentAttr + "_" + currentValue.substring(1);
+                }
+
+                if (mentionedValues.contains(action.getWord())) {
+                    //valueSpecificFeatures.get(action.getAction()).put("feature_specific_XValue_alreadyMentioned", 1.0);
+                    valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_XValue_alreadyMentioned", 1.0);
+                } else if (currentValueVariant.equals(action.getWord())
+                        && !currentValueVariant.isEmpty()) {
+                    //valueSpecificFeatures.get(action.getAction()).put("feature_specific_XValue_current", 1.0);
+                    valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_XValue_current", 1.0);
+
+                } else if (valuesThatFollow.contains(action.getWord())) {
+                    //valueSpecificFeatures.get(action.getAction()).put("feature_specific_XValue_thatFollows", 1.0);
+                    valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_XValue_thatFollows", 1.0);
+                } else {
+                    //valueSpecificFeatures.get(action.getAction()).put("feature_specific_XValue_notInMR", 1.0);
+                    valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_XValue_notInMR", 1.0);
+                }
+            }
+            /*for (int i : nGrams.keySet()) {
+            for (String nGram : nGrams.get(i)) {
+            if (i == 2) {
+            if (nGram.startsWith(prevWord + "|")
+            && nGram.endsWith("|" + action.getAction())) {
+            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPreviousWord", 1.0);
+            }
+            } else if (i == 3) {
+            if (nGram.startsWith(prevBigram + "|")
+            && nGram.endsWith("|" + action.getAction())) {
+            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPreviousBigram", 1.0);
+            }
+            } else if (i == 4) {
+            if (nGram.startsWith(prevTrigram + "|")
+            && nGram.endsWith("|" + action.getAction())) {
+            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPreviousTrigram", 1.0);
+            }
+            } else if (i == 5) {
+            if (nGram.startsWith(prev4gram + "|")
+            && nGram.endsWith("|" + action.getAction())) {
+            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPrevious4gram", 1.0);
+            }
+            } else if (i == 6) {
+            if (nGram.startsWith(prev5gram + "|")
+            && nGram.endsWith("|" + action.getAction())) {
+            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPrevious5gram", 1.0);
+            }
+            }
+            }
+            }*/
+
+            //valueSpecificFeatures.get(action.getAction()).put("global_feature_abstractMR_" + mr.getAbstractMR(), 1.0);
+            valueSpecificFeatures.get(action.getAction()).put("global_feature_currentValue_" + currentValue.toLowerCase(), 1.0);
+
+            ArrayList<String> fullGramLM = new ArrayList<>();
+            for (int i = 0; i < generatedWords.size(); i++) {
+                fullGramLM.add(generatedWords.get(i).getWord());
+            }
+
+            ArrayList<String> prev5wordGramLM = new ArrayList<>();
+            int j = 0;
+            for (int i = generatedWords.size() - 1; (i >= 0 && j < 5); i--) {
+                prev5wordGramLM.add(0, generatedWords.get(i).getWord());
+                j++;
+            }
+            prev5wordGramLM.add(action.getWord());
+            while (prev5wordGramLM.size() < 4) {
+                prev5wordGramLM.add(0, "@@");
+            }
+
+            double afterLMScorePerPred5Gram = getWordLMsPerPredicate().get(predicate).getProbability(prev5wordGramLM);
+            valueSpecificFeatures.get(action.getAction()).put("global_feature_LMWord_perPredicate_5gram_score", afterLMScorePerPred5Gram);
+
+            double afterLMScorePerPred = getWordLMsPerPredicate().get(predicate).getProbability(fullGramLM);
+            valueSpecificFeatures.get(action.getAction()).put("global_feature_LMWord_perPredicate_score", afterLMScorePerPred);
+        }
+		
+		return new Instance(generalFeatures, valueSpecificFeatures, costs);
+	}
+
+	@Override
+	public String postProcessWordSequence(DatasetInstance di, ArrayList<Action> wordSequence) {
+		
+		return null;
+	}
+
+	@Override
+	public String postProcessRef(MeaningRepresentation mr, ArrayList<Action> refSeq) {
+		String cleanedWords = "";
+		for(Action nlWord: refSeq){
+			if(!nlWord.equals(new Action(Action.TOKEN_END,""))
+					||!nlWord.equals(new Action(Action.TOKEN_START,""))){
+				if(nlWord.getWord().startsWith(Action.TOKEN_X)){
+					cleanedWords+= " " + mr.getDelexicalizationMap().get(nlWord.getWord());
+				}
+				else{
+					cleanedWords += " " + nlWord.getWord();
+				}
+			}
+		}
+		
+		return cleanedWords.trim();
+	}
+
+	@Override
+	public boolean loadInitClassifiers(int dataSize, HashMap<String, JAROW> trainedAttrClassifiers_0,
+			HashMap<String, HashMap<String, JAROW>> trainedWordClassifiers_0) {
+		
+		return false;
+	}
+
+	@Override
+	public void writeInitClassifiers(int dataSize, HashMap<String, JAROW> trainedAttrClassifiers_0,
+			HashMap<String, HashMap<String, JAROW>> trainedWordClassifiers_0) {
+		
+		
+	}
+
+}
+class InferE2EVectorsThread extends Thread {
+	DatasetInstance di;
+	E2E e2e ;
+	ConcurrentHashMap<DatasetInstance, HashMap<String, ArrayList<Instance>>> predicateContentTrainingData;
+    ConcurrentHashMap<DatasetInstance, HashMap<String, HashMap<String, ArrayList<Instance>>>> predicateWordTrainingData;
+    InferE2EVectorsThread(DatasetInstance di, E2E e2e,
+    		ConcurrentHashMap<DatasetInstance, HashMap<String, ArrayList<Instance>>> predicateContentTrainingData
+    		,ConcurrentHashMap<DatasetInstance, HashMap<String, HashMap<String, ArrayList<Instance>>>> predicateWordTrainingData){
+    	this.di = di;
+    	this.e2e = e2e;
+    	this.predicateContentTrainingData = predicateContentTrainingData;
+        this.predicateWordTrainingData = predicateWordTrainingData;
+    }
+    public void run(){
+    	String predicate = di.getMeaningRepresentation().getPredicate();
+        ArrayList<Action> refSequence = di.getDirectReferenceSequence();
+        HashSet<String> attrValuesAlreadyMentioned = new HashSet<>();
+        HashSet<String> attrValuesToBeMentioned = new HashSet<>();
+        for (String attribute : di.getMeaningRepresentation().getAttributeValues().keySet()) {
+            for (String value : di.getMeaningRepresentation().getAttributeValues().get(attribute)) {
+                attrValuesToBeMentioned.add(attribute.toLowerCase() + "=" + value.toLowerCase());
+            }
+        }
+        ArrayList<String> attributeSequence = new ArrayList<>();
+        String attrValue = "";
+        for (int w = 0; w < refSequence.size(); w++) {
+            if (!refSequence.get(w).getAttribute().equals(Action.TOKEN_PUNCT)
+                    && !refSequence.get(w).getAttribute().equals(attrValue)) {
+                if (!attrValue.isEmpty()) {
+                    attrValuesToBeMentioned.remove(attrValue);
+                }
+                // Create the feature and cost vector
+                Instance contentTrainingVector = e2e.createContentInstance(predicate, refSequence.get(w).getAttribute(), attributeSequence
+                		, attrValuesAlreadyMentioned, attrValuesToBeMentioned, di.getMeaningRepresentation(), e2e.getAvailableContentActions());
+                if (contentTrainingVector != null) {
+                    predicateContentTrainingData.get(di).get(predicate).add(contentTrainingVector);
+                }
+                attributeSequence.add(refSequence.get(w).getAttribute());
+
+                attrValue = refSequence.get(w).getAttribute();
+                if (!attrValue.isEmpty()) {
+                    attrValuesAlreadyMentioned.add(attrValue);
+                    attrValuesToBeMentioned.remove(attrValue);
+                }
+            }
+        }
+        //reset track 
+        attrValuesAlreadyMentioned = new HashSet<>();
+        attrValuesToBeMentioned = new HashSet<>();
+        for (String attribute : di.getMeaningRepresentation().getAttributeValues().keySet()) {
+            for (String value : di.getMeaningRepresentation().getAttributeValues().get(attribute)) {
+                attrValuesToBeMentioned.add(attribute.toLowerCase() + "=" + value.toLowerCase());
+            }
+        }
+        ArrayList<String> attrs = new ArrayList<>();
+        boolean isValueMentioned = false;
+        // The value that we currently need to mention
+        String valueTBM = "";
+        // These track the content (attribute/value pairs)
+        attrValue = "";
+        // Time-step counter
+        int a = -1;
+        // This tracks the subphrase consisting of the words generated for the current content action
+        ArrayList<String> subPhrase = new ArrayList<>();
+        // For every step of the sequence
+        for (int w = 0; w < refSequence.size(); w++) {
+            if (!refSequence.get(w).getAttribute().equals(Action.TOKEN_PUNCT)) {
+                // If this action does not belong to the current content, we need to update the trackers and switch to the new content action
+                if (!refSequence.get(w).getAttribute().equals(attrValue)) {
+                    a++;
+                    if (!attrValue.isEmpty()) {
+                        attrValuesToBeMentioned.remove(attrValue);
+                    }
+                    attrs.add(refSequence.get(w).getAttribute());
+
+                    attrValue = refSequence.get(w).getAttribute();
+                    subPhrase = new ArrayList<>();
+                    isValueMentioned = false;
+                    valueTBM = "";
+                    if (attrValue.contains("=")) {
+                        valueTBM = attrValue.substring(attrValue.indexOf('=') + 1);
+                    }
+                    if (valueTBM.isEmpty()) {
+                        isValueMentioned = true;
+                    }
+                }
+
+                // If it's not the end of the ActionSequence
+                if (!attrValue.equals(Action.TOKEN_END)) {
+                    // The subsequence of content actions we have generated for so far
+                    ArrayList<String> predictedAttributesForInstance = new ArrayList<>();
+                    for (int i = 0; i < attrs.size() - 1; i++) {
+                        predictedAttributesForInstance.add(attrs.get(i));
+                    }
+                    // ...exclusive of the current content action
+                    
+                    if (!attrs.get(attrs.size() - 1).equals(attrValue)) {
+                        predictedAttributesForInstance.add(attrs.get(attrs.size() - 1));
+                    }
+                    // The subsequence of content actions we will generated for after the current content action
+                    ArrayList<String> nextAttributesForInstance = new ArrayList<>(attributeSequence.subList(a + 1, attributeSequence.size()));
+                    // Create the feature and cost vector
+                    Instance wordTrainingVector = e2e.createWordInstance(predicate, refSequence.get(w), predictedAttributesForInstance, 
+                    		new ArrayList<>(refSequence.subList(0, w)), nextAttributesForInstance, attrValuesAlreadyMentioned
+                    		, attrValuesToBeMentioned, isValueMentioned, e2e.getAvailableWordActions().get(predicate));
+
+                    if (wordTrainingVector != null) {
+                        String attribute = attrValue;
+                        if (attribute.contains("=")) {
+                            attribute = attrValue.substring(0, attrValue.indexOf('='));
+                        }
+                        if (!predicateWordTrainingData.get(di).containsKey(predicate)) {
+                            predicateWordTrainingData.get(di).put(predicate, new HashMap<String, ArrayList<Instance>>());
+                        }
+                        if (!predicateWordTrainingData.get(di).get(predicate).containsKey(attribute)) {
+                            predicateWordTrainingData.get(di).get(predicate).put(attribute, new ArrayList<Instance>());
+                        }
+                        predicateWordTrainingData.get(di).get(predicate).get(attribute).add(wordTrainingVector);
+                        if (!refSequence.get(w).getWord().equals(Action.TOKEN_START)
+                                && !refSequence.get(w).getWord().equals(Action.TOKEN_END)) {
+                            subPhrase.add(refSequence.get(w).getWord());
+                        }
+                    }
+                    
+                    // Check if we have mentioned the value of the current content action
+                    if (!isValueMentioned) {
+                        // If the value is a variable, we just check if the word action we just generated is that variable
+                        if (refSequence.get(w).getWord().startsWith(Action.TOKEN_X)
+                                && (valueTBM.matches("[xX][0-9]+") || valueTBM.matches("\"[xX][0-9]+\"")
+                                || valueTBM.startsWith(Action.TOKEN_X))) {
+                            isValueMentioned = true;
+                        // Otherwise
+                        } else if (!refSequence.get(w).getWord().startsWith(Action.TOKEN_X)
+                                && !(valueTBM.matches("[xX][0-9]+") || valueTBM.matches("\"[xX][0-9]+\"")
+                                || valueTBM.startsWith(Action.TOKEN_X))) {
+                            // We form the key for the value, as it appears in the valueAlignments collection
+                            String valueToCheck = valueTBM;
+                            
+                            if (valueToCheck.equals("no")
+                                    || valueToCheck.equals("yes")
+                                    || valueToCheck.equals("yes or no")
+                                    || valueToCheck.equals("none")
+                                    || valueToCheck.equals("empty")) {
+                                String attribute = attrValue;
+                                if (attribute.contains("=")) {
+                                    attribute = attrValue.substring(0, attrValue.indexOf('='));
+                                }
+                                valueToCheck = attribute + ":" + valueTBM;
+                            }
+                            // We look up the value in all the value alignments we have made during the parsing of the data, and see if it is mentioned in the subphrase
+                            // Note that the value may be formed by multiple word actions
+                            if (!valueToCheck.equals("empty:empty")
+                                    && e2e.getValueAlignments().containsKey(valueToCheck)) {
+                                for (ArrayList<String> alignedStr : e2e.getValueAlignments().get(valueToCheck).keySet()) {
+                                    if (e2e.endsWith(subPhrase, alignedStr)) {
+                                        isValueMentioned = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (isValueMentioned) {
+                            attrValuesAlreadyMentioned.add(attrValue);
+                            attrValuesToBeMentioned.remove(attrValue);
+                        }
+                    }
+                    // We also check if we have inadvertedly mentioned some other pending value (not the current one)
+                    String mentionedAttrValue = "";
+                    if (!refSequence.get(w).getWord().startsWith(Action.TOKEN_X)) {
+                        for (String attrValueTBM : attrValuesToBeMentioned) {
+                            if (attrValueTBM.contains("=")) {
+                                String value = attrValueTBM.substring(attrValueTBM.indexOf('=') + 1);
+                                
+                                if (!value.startsWith(Action.TOKEN_X)) {
+                                    String valueToCheck = value;
+                                    if (valueToCheck.equals("no")
+                                            || valueToCheck.equals("yes")
+                                            || valueToCheck.equals("yes or no")
+                                            || valueToCheck.equals("none")
+                                            || valueToCheck.equals("empty")) {
+                                        valueToCheck = attrValueTBM.replace("=", ":");
+                                    }
+                                    if (!valueToCheck.equals("empty:empty")
+                                            && e2e.getValueAlignments().containsKey(valueToCheck)) {
+                                        for (ArrayList<String> alignedStr : e2e.getValueAlignments().get(valueToCheck).keySet()) {
+                                            if (e2e.endsWith(subPhrase, alignedStr)) {
+                                                mentionedAttrValue = attrValueTBM;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (!mentionedAttrValue.isEmpty()) {
+                        attrValuesAlreadyMentioned.add(mentionedAttrValue);
+                        attrValuesToBeMentioned.remove(mentionedAttrValue);
+                    }
+                }
+            }
+        }
+    	
+    }
+}
+
