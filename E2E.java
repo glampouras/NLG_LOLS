@@ -1,6 +1,7 @@
 package structuredPredictionNLG;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -9,6 +10,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -19,10 +21,19 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import edu.stanford.nlp.mt.metrics.BLEUMetric;
+import edu.stanford.nlp.mt.tools.NISTTokenizer;
+import edu.stanford.nlp.mt.util.IString;
+import edu.stanford.nlp.mt.util.IStrings;
+import edu.stanford.nlp.mt.util.ScoredFeaturizedTranslation;
+import edu.stanford.nlp.mt.util.Sequence;
 import gnu.trove.map.hash.TObjectDoubleHashMap;
+import imitationLearning.JLOLS;
 import jarow.Instance;
 import jarow.JAROW;
+import jarow.Prediction;
 import similarity_measures.Levenshtein;
+import similarity_measures.Rouge;
 import simpleLM.SimpleLM;
 
 public class E2E extends DatasetParser {
@@ -38,6 +49,8 @@ public class E2E extends DatasetParser {
 		E2E e2e = new E2E(args);
 		e2e.parseDataset();
 		e2e.createTrainingData();
+		e2e.performImitationLearning();
+		
 
 	}
 
@@ -55,9 +68,9 @@ public class E2E extends DatasetParser {
         getDatasetInstances().put(singlePredicate,new ArrayList<>());
         
         
-        if (true && !loadLists()) {
+        if (isResetStoredCaches() || !loadLists()) {
         	createLists(trainingDataFile);
-        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate));
+        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate).subList(0, 100));
         	getDatasetInstances().put(singlePredicate,new ArrayList<>());
         	createLists(devDataFile);
         	getValidationData().addAll(getDatasetInstances().get(singlePredicate));
@@ -66,7 +79,14 @@ public class E2E extends DatasetParser {
         }
         System.out.println("Training data size: " + getTrainingData().size());
         System.out.println("Validation data size: " + getValidationData().size());
-		
+        
+        //getTrainingData().forEach((di)->{
+        	
+        	//for(Action a: di.getDirectReferenceSequence()){
+        	//	System.out.print(a.getWord()+" ");
+        	//}
+        	//System.out.println("");
+        //});
 		
 		
 		
@@ -116,9 +136,12 @@ public class E2E extends DatasetParser {
         // for each instance    
         int num=0;
         for(String line : dataPart){
-        	System.out.println(num);
+        	//System.out.println(num);
            	String MRPart = line.split("\",")[0];
-        	String RefPart = line.split("\",")[1];
+        	String RefPart = line.split("\",")[1].toLowerCase();
+        	if(RefPart.equals("café")){
+        		continue;
+        	}
         	if(MRPart.startsWith("\"")){
         		MRPart = MRPart.substring(1);
         	}
@@ -135,22 +158,22 @@ public class E2E extends DatasetParser {
         	HashMap<String, HashSet<String>> attributeValues = new HashMap<>();
         	// for each attribute value pairs
         	for(String mr : MRs){
-        		String value = mr.substring(mr.indexOf("[")+1, mr.indexOf("]")).trim();
-        		String attribute = mr.substring(0,mr.indexOf("[")).trim();
+        		String value = mr.substring(mr.indexOf("[")+1, mr.indexOf("]")).trim().toLowerCase();
+        		String attribute = mr.substring(0,mr.indexOf("[")).trim().toLowerCase();
         		if(attribute.equals("name")){
         			// delexicalize name values
-        			String delexValue = Action.TOKEN_X+attribute;
+        			String delexValue = Action.TOKEN_X+attribute+"_0";
         			delexicalizedMap.put(delexValue, value);
         			
         		}
         		if(attribute.equals("near")){
         			//delexicalize near values
-        			String delexValue = Action.TOKEN_X+attribute;
+        			String delexValue = Action.TOKEN_X+attribute+"_0";
         			delexicalizedMap.put(delexValue, value);
         		}        		
         		if(value.equals("yes")||value.equals("no")){
         			
-        			value =attribute+" "+value;
+        			value =attribute+"_"+value;
         		}
         		getAttributes().put(singlePredicate,new HashSet<>());
         		if(attribute!=null){
@@ -169,9 +192,7 @@ public class E2E extends DatasetParser {
         	}
         	
         	
-        	if(RefPart.equals("Café")){
-        		continue;
-        	}
+        	
         	for(String deValue: delexicalizedMap.keySet()){
         		String value = delexicalizedMap.get(deValue);
         		if(RefPart.contains(value)){
@@ -179,21 +200,50 @@ public class E2E extends DatasetParser {
         		}
         	}
         	
+        	/*
+        	if(RefPart.contains("name-")){
+        		RefPart = RefPart.replace("name-","name -");
+        	}
         	if(RefPart.contains("@x@names")){
         		RefPart = RefPart.replace("@x@names", "@x@name s");
         	}
+        	if(RefPart.contains("@x@nearian")){
+        		RefPart = RefPart.replace("@x@nearian", "@x@near");
+        	}
+        	if(RefPart.contains("@x@namen")){
+        		RefPart = RefPart.replace("@x@namen", "@x@name");
+        	}
+        	if(RefPart.contains("@x@nearn")){
+        		RefPart = RefPart.replace("@x@nearn", "@x@near");
+        	}
+        	if(RefPart.contains("@x@nears")){
+        		RefPart = RefPart.replace("@x@nears", "@x@near s");
+        	}*/
+        	if(RefPart.contains("@x@name_0s")){
+        		RefPart = RefPart.replace("@x@name_0s", "@x@name_0 s");
+        	}
+        	if(RefPart.contains("@x@near_0s")){
+        		RefPart = RefPart.replace("@x@near_0s", "@x@near_0 s");
+        	}
+        	
         	// create MR for each instance 
         	MeaningRepresentation MR = new MeaningRepresentation(singlePredicate,attributeValues,MRPart,delexicalizedMap);
         	// start create the value alignments
         	ArrayList<String> observedAttrValueSequence = new ArrayList<>();
             ArrayList<String> observedWordSequence = new ArrayList<>();
             // replace the punctuation in the reference
-            RefPart = RefPart.replaceAll("[.,?:;!']", " "+Action.TOKEN_PUNCT+" ");
+            RefPart = RefPart.replaceAll("[.,?:;!'-]", " "+Action.TOKEN_PUNCT+" ");
             String[] words = RefPart.split(" ");
             for(String w: words){
-            	
+            	if(w.contains("@x@name_0)")&&!w.equals("@x@name_0")){
+            		w = "@x@name_0";
+            	}
+            	if(w.contains("@x@near_0")&&!w.equals("@x@near_0")){
+            		w = "@x@near_0";
+            	}
             	observedWordSequence.add(w.trim());
             }
+            
          // We store the maximum observed word sequence length, to use as a limit during generation
             if (observedWordSequence.size() > getMaxWordSequenceLength()) {
                 setMaxWordSequenceLength(observedWordSequence.size());
@@ -201,6 +251,7 @@ public class E2E extends DatasetParser {
             // We initialize the alignments between words and attribute/value pairs
             ArrayList<String> wordToAttrValueAlignment = new ArrayList<>();
             for(String w: observedWordSequence){
+            	
             	if(w.equals(Action.TOKEN_PUNCT)){
             		wordToAttrValueAlignment.add(Action.TOKEN_PUNCT);
             	}
@@ -228,8 +279,8 @@ public class E2E extends DatasetParser {
             	MR.getAttributeValues().get(attr).stream().filter((value)->(!value.startsWith(Action.TOKEN_X)))
             	.forEachOrdered((value)->{
             		String valueToCompare = value;
-            		if(valueToCompare.contains("familyFriendly")){
-            			valueToCompare = valueToCompare.replace("familyFriendly", "family friendly");
+            		if(valueToCompare.contains("familyfriendly")){
+            			valueToCompare = valueToCompare.replace("familyfriendly", "family_friendly");
             		}
             		observedValueAlignments.put(valueToCompare, new HashMap<String, Double>());
             		// n grams 
@@ -598,7 +649,7 @@ public class E2E extends DatasetParser {
 		
 		
 		//  create language model for word sequence and content sequence
-		if(!loadLMs()){
+		if(isResetStoredCaches()||!loadLMs()){
 			HashMap<String, ArrayList<ArrayList<String>>> LMWordTrainingPerPred = new HashMap<>();
 			HashMap<String, ArrayList<ArrayList<String>>> LMAttrTrainingPerPred = new HashMap<>();	
 			LMWordTrainingPerPred.put(singlePredicate, new ArrayList<>());	
@@ -650,7 +701,13 @@ public class E2E extends DatasetParser {
         		di.getDirectReferenceSequence().stream().forEach((action)->{
         			if(!action.getWord().equals(Action.TOKEN_PUNCT)&&
         					!action.getWord().equals(Action.TOKEN_START)){
-        				availableWordActions.get(singlePredicate).get(attr.toLowerCase()).add(new Action(action.getWord(),attr.toLowerCase()));
+        				if (action.getWord().startsWith(Action.TOKEN_X)) {
+                            if (action.getWord().substring(3, action.getWord().lastIndexOf('_')).toLowerCase().trim().equals(attr)) {
+                                availableWordActions.get(singlePredicate).get(attr).add(new Action(action.getWord(), attr));
+                            }
+                        } else {
+                            availableWordActions.get(singlePredicate).get(attr).add(new Action(action.getWord(), attr));
+                        }
         			}
         			
         		});
@@ -667,7 +724,7 @@ public class E2E extends DatasetParser {
         
         // create training instances
         
-        if(!loadTrainingData(getTrainingData().size())){
+        if(isResetStoredCaches()||!loadTrainingData(getTrainingData().size())){
         	System.out.print("Create training data...");
         	Object[] results = inferFeatureAndCostVectors();
         	System.out.print("almost...");
@@ -707,8 +764,16 @@ public class E2E extends DatasetParser {
                 });
             });
             writeTrainingData(getTrainingData().size());
-        }
+        }/*
+        getTrainingData().forEach((di)->{
+        	for(Action a: di.getDirectReferenceSequence()){
+        		System.out.print(a.getAttribute()+"#"+a.getWord()+" ");
+        	}
+        	System.out.println("");
+        });*/	
+        
 	}
+	
 	@SuppressWarnings("unchecked")
 	public boolean loadTrainingData(int dataSize) {
         String file1 = "cache/attrTrainingData"+ "_" + dataSize;
@@ -792,6 +857,7 @@ public class E2E extends DatasetParser {
             }
         }
     }
+	
 	public Object[] inferFeatureAndCostVectors() {
 		ConcurrentHashMap<DatasetInstance, HashMap<String, ArrayList<Instance>>> contentTrainingData = new ConcurrentHashMap<>();
         ConcurrentHashMap<DatasetInstance, HashMap<String, HashMap<String, ArrayList<Instance>>>> wordTrainingData = new ConcurrentHashMap<>();
@@ -818,12 +884,14 @@ public class E2E extends DatasetParser {
             });
          // Infer the vectors in parallel processes to save time
             ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
+            //ArrayList<DatasetInstance> newList = new ArrayList<>();
+            //for(int w =0;w<100;w++){
+            	//newList.add(getTrainingData().get(w));
+            //}
             
             getTrainingData().forEach((di) -> {
-            	//System.out.println("1");
+            //newList.forEach((di)->{
             	
-            	//InferE2EVectorsThread thread = new InferE2EVectorsThread(di, this, contentTrainingData, wordTrainingData);
-            	//thread.run();
             	
                 executor.execute(new InferE2EVectorsThread(di, this, contentTrainingData, wordTrainingData));
             });
@@ -929,9 +997,619 @@ public class E2E extends DatasetParser {
 	public Double evaluateGeneration(HashMap<String, JAROW> classifierAttrs,
 			HashMap<String, HashMap<String, JAROW>> classifierWords, ArrayList<DatasetInstance> testingData,
 			int epoch) {
+		System.out.println("Evaluate argument generation ");
 		
-		return null;
-	}
+        ArrayList<ScoredFeaturizedTranslation<IString, String>> generations = new ArrayList<>();
+        HashMap<DatasetInstance, ArrayList<Action>> generationActions = new HashMap<>();
+        ArrayList<ArrayList<Sequence<IString>>> finalReferences = new ArrayList<>();
+        HashMap<DatasetInstance, ArrayList<String>> finalReferencesWordSequences = new HashMap<>();
+        HashMap<DatasetInstance, String> predictedWordSequences_overAllPredicates = new HashMap<>();
+        ArrayList<String> allPredictedWordSequences = new ArrayList<>();
+        ArrayList<String> allPredictedMRStr = new ArrayList<>();
+        ArrayList<ArrayList<String>> allPredictedReferences = new ArrayList<>();
+        HashMap<String, Double> attrCoverage = new HashMap<>();
+
+        HashMap<String, HashSet<String>> abstractMRsToMRs = new HashMap<>();
+        for (DatasetInstance di : testingData) {
+        	
+            String predicate = di.getMeaningRepresentation().getPredicate();
+            ArrayList<Action> predictedActionList = new ArrayList<>();
+            ArrayList<Action> predictedWordList = new ArrayList<>();
+
+            //PHRASE GENERATION EVALUATION
+            String predictedAttr = "";
+            ArrayList<String> predictedAttrValues = new ArrayList<>();
+
+            HashSet<String> attrValuesToBeMentioned = new HashSet<>();
+            HashSet<String> attrValuesAlreadyMentioned = new HashSet<>();
+            for (String attribute : di.getMeaningRepresentation().getAttributeValues().keySet()) {
+                for (String value : di.getMeaningRepresentation().getAttributeValues().get(attribute)) {
+                    attrValuesToBeMentioned.add(attribute.toLowerCase() + "=" + value.toLowerCase());
+                }
+            }
+            if (attrValuesToBeMentioned.isEmpty()) {
+                attrValuesToBeMentioned.add("empty=empty");
+            }
+            // generate attribute feature vectors till the end 
+            while (!predictedAttr.equals(Action.TOKEN_END) && predictedAttrValues.size() < getMaxContentSequenceLength()) {
+                if (!predictedAttr.isEmpty()) {
+                    attrValuesToBeMentioned.remove(predictedAttr);
+                }
+                if (!attrValuesToBeMentioned.isEmpty()) {
+                    Instance attrTrainingVector = createContentInstance(predicate, "@TOK@", predictedAttrValues, attrValuesAlreadyMentioned, attrValuesToBeMentioned, di.getMeaningRepresentation(), getAvailableContentActions());
+
+                    if (attrTrainingVector != null) {
+                        Prediction predictAttr = classifierAttrs.get(predicate).predict(attrTrainingVector);
+                        if (predictAttr.getLabel() != null) {
+                            predictedAttr = predictAttr.getLabel().trim();
+
+                            if (!classifierAttrs.get(predicate).getCurrentWeightVectors().keySet().containsAll(di.getMeaningRepresentation().getAttributeValues().keySet())) {
+                                System.out.println("MR ATTR NOT IN CLASSIFIERS");
+                                System.out.println(classifierAttrs.get(predicate).getCurrentWeightVectors().keySet());
+                            }
+                            String predictedValue = "";
+                            if (!predictedAttr.equals(Action.TOKEN_END)) {
+                                predictedValue = chooseNextValue(predictedAttr, attrValuesToBeMentioned);
+
+                                HashSet<String> rejectedAttrs = new HashSet<>();
+                                while (predictedValue.isEmpty() && (!predictedAttr.equals(Action.TOKEN_END) || (predictedAttrValues.isEmpty() && classifierAttrs.get(predicate).getCurrentWeightVectors().keySet().containsAll(di.getMeaningRepresentation().getAttributeValues().keySet())))) {
+                                    rejectedAttrs.add(predictedAttr);
+
+                                    predictedAttr = Action.TOKEN_END;
+                                    double maxScore = -Double.MAX_VALUE;
+                                    for (String attr : predictAttr.getLabel2Score().keySet()) {
+                                        if (!rejectedAttrs.contains(attr)
+                                                && (Double.compare(predictAttr.getLabel2Score().get(attr), maxScore) > 0)) {
+                                            maxScore = predictAttr.getLabel2Score().get(attr);
+                                            predictedAttr = attr;
+                                        }
+                                    }
+                                    if (!predictedAttr.equals(Action.TOKEN_END)) {
+                                        predictedValue = chooseNextValue(predictedAttr, attrValuesToBeMentioned);
+                                    }
+                                }
+                            }
+                            if (!predictedAttr.equals(Action.TOKEN_END)) {
+                                predictedAttr += "=" + predictedValue;
+                            }
+                            predictedAttrValues.add(predictedAttr);
+                            if (!predictedAttr.isEmpty()) {
+                                attrValuesAlreadyMentioned.add(predictedAttr);
+                                attrValuesToBeMentioned.remove(predictedAttr);
+                            }
+                        } else {
+                            predictedAttr = Action.TOKEN_END;
+                            predictedAttrValues.add(predictedAttr);
+                        }
+                    } else {
+                        predictedAttr = Action.TOKEN_END;
+                        predictedAttrValues.add(predictedAttr);
+                    }
+                } else {
+                    predictedAttr = Action.TOKEN_END;
+                    predictedAttrValues.add(predictedAttr);
+                }
+            }
+
+            //WORD SEQUENCE EVALUATION
+            predictedAttr = "";
+            ArrayList<String> predictedAttributes = new ArrayList<>();
+
+            attrValuesToBeMentioned = new HashSet<>();
+            attrValuesAlreadyMentioned = new HashSet<>();
+            HashMap<String, ArrayList<String>> valuesToBeMentioned = new HashMap<>();
+            for (String attribute : di.getMeaningRepresentation().getAttributeValues().keySet()) {
+                for (String value : di.getMeaningRepresentation().getAttributeValues().get(attribute)) {
+                    attrValuesToBeMentioned.add(attribute.toLowerCase() + "=" + value.toLowerCase());
+                }
+                valuesToBeMentioned.put(attribute, new ArrayList<>(di.getMeaningRepresentation().getAttributeValues().get(attribute)));
+            }
+            if (attrValuesToBeMentioned.isEmpty()) {
+                attrValuesToBeMentioned.add("empty=empty");
+            }
+            HashSet<String> attrValuesToBeMentionedCopy = new HashSet<>(attrValuesToBeMentioned);
+
+            int a = -1;
+            for (String attrValue : predictedAttrValues) {
+                a++;
+                if (!attrValue.equals(Action.TOKEN_END)) {
+                    String attribute = attrValue.split("=")[0];
+                    predictedAttributes.add(attrValue);
+
+                    //GENERATE PHRASES
+                    if (!attribute.equals(Action.TOKEN_END)) {
+                        if (classifierWords.get(predicate).containsKey(attribute)) {
+                            ArrayList<String> nextAttributesForInstance = new ArrayList<>(predictedAttrValues.subList(a + 1, predictedAttrValues.size()));
+                            String predictedWord = "";
+
+                            boolean isValueMentioned = false;
+                            String valueTBM = "";
+                            if (attrValue.contains("=")) {
+                                valueTBM = attrValue.substring(attrValue.indexOf('=') + 1);
+                            }
+                            if (valueTBM.isEmpty()) {
+                                isValueMentioned = true;
+                            }
+                            ArrayList<String> subPhrase = new ArrayList<>();
+                            while (!predictedWord.equals(Action.TOKEN_END) && predictedWordList.size() < getMaxWordSequenceLength()) {
+                                ArrayList<String> predictedAttributesForInstance = new ArrayList<>();
+                                for (int i = 0; i < predictedAttributes.size() - 1; i++) {
+                                    predictedAttributesForInstance.add(predictedAttributes.get(i));
+                                }
+                                if (!predictedAttributes.get(predictedAttributes.size() - 1).equals(attrValue)) {
+                                    predictedAttributesForInstance.add(predictedAttributes.get(predictedAttributes.size() - 1));
+                                }
+                                Instance wordTrainingVector = createWordInstance(predicate, new Action("@TOK@", attrValue), predictedAttributesForInstance, predictedActionList, nextAttributesForInstance, attrValuesAlreadyMentioned, attrValuesToBeMentioned, isValueMentioned, getAvailableWordActions().get(predicate));
+
+                                if (wordTrainingVector != null
+                                        && classifierWords.get(predicate) != null) {
+                                    if (classifierWords.get(predicate).get(attribute) != null) {
+                                        Prediction predictWord = classifierWords.get(predicate).get(attribute).predict(wordTrainingVector);
+                                        if (predictWord.getLabel() != null) {
+                                            predictedWord = predictWord.getLabel().trim();
+                                            while (predictedWord.equals(Action.TOKEN_END) && !predictedActionList.isEmpty() && predictedActionList.get(predictedActionList.size() - 1).getWord().equals(Action.TOKEN_END)) {
+                                                double maxScore = -Double.MAX_VALUE;
+                                                for (String word : predictWord.getLabel2Score().keySet()) {
+                                                    if (!word.equals(Action.TOKEN_END)
+                                                            && (Double.compare(predictWord.getLabel2Score().get(word), maxScore) > 0)) {
+                                                        maxScore = predictWord.getLabel2Score().get(word);
+                                                        predictedWord = word;
+                                                    }
+                                                }
+                                            }
+
+                                            predictedActionList.add(new Action(predictedWord, attrValue));
+                                            if (!predictedWord.equals(Action.TOKEN_START)
+                                                    && !predictedWord.equals(Action.TOKEN_END)) {
+                                                subPhrase.add(predictedWord);
+                                                predictedWordList.add(new Action(predictedWord, attrValue));
+                                            }
+                                        } else {
+                                            predictedWord = Action.TOKEN_END;
+                                            predictedActionList.add(new Action(predictedWord, attrValue));
+                                        }
+                                    } else {
+                                        predictedWord = Action.TOKEN_END;
+                                        predictedActionList.add(new Action(predictedWord, attrValue));
+                                    }
+
+                                }
+                                if (!isValueMentioned) {
+                                    if (!predictedWord.equals(Action.TOKEN_END)) {
+                                        if (predictedWord.startsWith(Action.TOKEN_X)
+                                                && (valueTBM.matches("\"[xX][0-9]+\"")
+                                                || valueTBM.matches("[xX][0-9]+")
+                                                || valueTBM.startsWith(Action.TOKEN_X))) {
+                                            isValueMentioned = true;
+                                        } else if (!predictedWord.startsWith(Action.TOKEN_X)
+                                                && !(valueTBM.matches("\"[xX][0-9]+\"")
+                                                || valueTBM.matches("[xX][0-9]+")
+                                                || valueTBM.startsWith(Action.TOKEN_X))) {
+                                            String valueToCheck = valueTBM;
+                                            if (valueToCheck.equals("no")
+                                                    || valueToCheck.equals("yes")
+                                                    || valueToCheck.equals("yes or no")
+                                                    || valueToCheck.equals("none")
+                                                    //|| valueToCheck.equals("dont_care")
+                                                    || valueToCheck.equals("empty")) {
+                                                if (attribute.contains("=")) {
+                                                    valueToCheck = attribute.replace("=", ":");
+                                                } else {
+                                                    valueToCheck = attribute + ":" + valueTBM;
+                                                }
+                                            }
+                                            if (!valueToCheck.equals("empty:empty")
+                                                    && getValueAlignments().containsKey(valueToCheck)) {
+                                                for (ArrayList<String> alignedStr : getValueAlignments().get(valueToCheck).keySet()) {
+                                                    if (endsWith(subPhrase, alignedStr)) {
+                                                        isValueMentioned = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (isValueMentioned) {
+                                        attrValuesAlreadyMentioned.add(attrValue);
+                                        attrValuesToBeMentioned.remove(attrValue);
+                                    }
+                                }
+                                String mentionedAttrValue = "";
+                                if (!predictedWord.startsWith(Action.TOKEN_X)) {
+                                    for (String attrValueTBM : attrValuesToBeMentioned) {
+                                        if (attrValueTBM.contains("=")) {
+                                            String value = attrValueTBM.substring(attrValueTBM.indexOf('=') + 1);
+                                            if (!(value.matches("\"[xX][0-9]+\"")
+                                                    || value.matches("[xX][0-9]+")
+                                                    || value.startsWith(Action.TOKEN_X))) {
+                                                String valueToCheck = value;
+                                                if (valueToCheck.equals("no")
+                                                        || valueToCheck.equals("yes")
+                                                        || valueToCheck.equals("yes or no")
+                                                        || valueToCheck.equals("none")
+                                                        //|| valueToCheck.equals("dont_care")
+                                                        || valueToCheck.equals("empty")) {
+                                                    valueToCheck = attrValueTBM.replace("=", ":");
+                                                }
+                                                if (!valueToCheck.equals("empty:empty")
+                                                        && getValueAlignments().containsKey(valueToCheck)) {
+                                                    for (ArrayList<String> alignedStr : getValueAlignments().get(valueToCheck).keySet()) {
+                                                        if (endsWith(subPhrase, alignedStr)) {
+                                                            mentionedAttrValue = attrValueTBM;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (!mentionedAttrValue.isEmpty()) {
+                                    attrValuesAlreadyMentioned.add(mentionedAttrValue);
+                                    attrValuesToBeMentioned.remove(mentionedAttrValue);
+                                }
+                            }
+                            if (predictedWordList.size() >= getMaxWordSequenceLength()
+                                    && !predictedActionList.get(predictedActionList.size() - 1).getWord().equals(Action.TOKEN_END)) {
+                                predictedWord = Action.TOKEN_END;
+                                predictedActionList.add(new Action(predictedWord, attrValue));
+                            }
+                        } else {
+                            String predictedWord = Action.TOKEN_END;
+                            predictedActionList.add(new Action(predictedWord, attrValue));
+                        }
+                    }
+                }
+            }
+            ArrayList<String> predictedAttrs = new ArrayList<>();
+            predictedAttrValues.forEach((attributeValuePair) -> {
+                predictedAttrs.add(attributeValuePair.split("=")[0]);
+            });
+
+            String predictedWordSequence = postProcessWordSequence(di, predictedActionList);
+            System.out.println(predictedWordSequence);
+            System.out.println(di.getDirectReference());
+            System.out.println("");
+            
+            ArrayList<String> predictedAttrList = getPredictedAttrList(predictedActionList);
+            if (attrValuesToBeMentionedCopy.size() != 0.0) {
+                double missingAttrs = 0.0;
+                missingAttrs = attrValuesToBeMentionedCopy.stream().filter((attr) -> (!predictedAttrList.contains(attr))).map((_item) -> 1.0).reduce(missingAttrs, (accumulator, _item) -> accumulator + _item);
+                double attrSize = attrValuesToBeMentionedCopy.size();
+                attrCoverage.put(predictedWordSequence, missingAttrs / attrSize);
+            }
+
+            allPredictedWordSequences.add(predictedWordSequence);
+            allPredictedMRStr.add(di.getMeaningRepresentation().getMRstr());
+            predictedWordSequences_overAllPredicates.put(di, predictedWordSequence);
+
+            if (!abstractMRsToMRs.containsKey(di.getMeaningRepresentation().getAbstractMR())) {
+                abstractMRsToMRs.put(di.getMeaningRepresentation().getAbstractMR(), new HashSet<String>());
+            }
+            abstractMRsToMRs.get(di.getMeaningRepresentation().getAbstractMR()).add(di.getMeaningRepresentation().getMRstr());
+
+            Sequence<IString> translation = IStrings.tokenize(NISTTokenizer.tokenize(predictedWordSequence.toLowerCase()));
+            ScoredFeaturizedTranslation<IString, String> tran = new ScoredFeaturizedTranslation<>(translation, null, 0);
+            generations.add(tran);
+            generationActions.put(di, predictedActionList);
+
+            ArrayList<Sequence<IString>> references = new ArrayList<>();
+            ArrayList<String> referencesStrings = new ArrayList<>();
+
+            if (getPerformEvaluationOn().equals("valid") || getPerformEvaluationOn().equals("train")) {
+                for (String ref : di.getEvaluationReferences()) {
+                    referencesStrings.add(ref);
+                    references.add(IStrings.tokenize(NISTTokenizer.tokenize(ref)));
+                }
+            } else {
+                //references = wenEvaluationReferenceSequences.get(di.getMeaningRepresentation().getMRstr());
+                //referencesStrings = wenEvaluationReferences.get(di.getMeaningRepresentation().getMRstr());
+                //if (references == null) {
+                    references = new ArrayList<>();
+                    referencesStrings = new ArrayList<>();
+                    for (String ref : di.getEvaluationReferences()) {
+                        referencesStrings.add(ref);
+                        references.add(IStrings.tokenize(NISTTokenizer.tokenize(ref)));
+                    }
+                //}
+            }
+            allPredictedReferences.add(referencesStrings);
+            finalReferencesWordSequences.put(di, referencesStrings);
+            finalReferences.add(references);
+        }
+
+        @SuppressWarnings("unchecked")
+		BLEUMetric BLEU = new BLEUMetric(finalReferences, 4, false);
+        @SuppressWarnings("unchecked")
+		Double bleuScore = BLEU.score(generations);
+
+        double finalCoverageError = 0.0;
+        finalCoverageError = attrCoverage.values().stream().map((c) -> c).reduce(finalCoverageError, (accumulator, _item) -> accumulator + _item);
+        finalCoverageError /= attrCoverage.size();
+        for (int i = 0; i < allPredictedWordSequences.size(); i++) {
+            double maxRouge = 0.0;
+            String predictedWordSequence = allPredictedWordSequences.get(i).replaceAll("\\?", " \\? ").replaceAll(":", " : ").replaceAll("\\.", " \\. ").replaceAll(",", " , ").replaceAll("  ", " ").trim();
+            for (String ref : allPredictedReferences.get(i)) {
+                double rouge = Rouge.ROUGE_N(predictedWordSequence, ref, 4);
+                if (rouge > maxRouge) {
+                    maxRouge = rouge;
+                }
+            }
+            //System.out.println(allPredictedMRStr.get(i) + "\t" + maxRouge + "\t" + allPredictedWordSequences.get(i) + "\t" + refs);
+        }
+
+        double avgRougeScore = 0.0;
+        String detailedRes = "";
+
+        avgRougeScore = testingData.stream().map((di) -> {
+            double maxRouge = 0.0;
+            if (!finalReferencesWordSequences.containsKey(di)) {
+                System.out.println(di.getMeaningRepresentation().getAbstractMR());
+            }
+            String predictedWordSequence = predictedWordSequences_overAllPredicates.get(di).replaceAll("\\?", " \\? ").replaceAll(":", " : ").replaceAll("\\.", " \\. ").replaceAll(",", " , ").replaceAll("  ", " ").trim();
+            for (String ref : finalReferencesWordSequences.get(di)) {
+                double rouge = Rouge.ROUGE_N(predictedWordSequence, ref, 4);
+                if (rouge > maxRouge) {
+                    maxRouge = rouge;
+                }
+            }
+            return maxRouge;
+        }).map((maxRouge) -> maxRouge).reduce(avgRougeScore, (accumulator, _item) -> accumulator + _item);
+        System.out.println("BLEU: \t" + bleuScore);
+        //System.out.println("g: " + generations);
+        //System.out.println("attr: " + predictedAttrLists);
+        //System.out.println("BLEU smooth: \t" + bleuSmoothScore);
+        //System.out.println("g: " + generations);
+        //System.out.println("attr: " + predictedAttrLists);
+        //System.out.println("BLEU smooth: \t" + bleuSmoothScore);
+        System.out.println("ROUGE: \t" + (avgRougeScore / allPredictedWordSequences.size()));
+        System.out.println("COVERAGE ERROR: \t" + finalCoverageError);
+        System.out.println("BRC: \t" + ((avgRougeScore / allPredictedWordSequences.size()) + bleuScore + (1.0 - finalCoverageError)) / 3.0);
+
+        if (isCalculateResultsPerPredicate()) {
+            ////////////////////////
+            //ArrayList<String> bestPredictedStrings = new ArrayList<>();
+            //ArrayList<String> bestPredictedStringsMRs = new ArrayList<>();
+            double uniqueMRsInTestAndNotInTrainAllPredWordBLEU = 0.0;
+            double uniqueMRsInTestAndNotInTrainAllPredWordROUGE = 0.0;
+            double uniqueMRsInTestAndNotInTrainAllPredWordCOVERAGEERR = 0.0;
+            double uniqueMRsInTestAndNotInTrainAllPredWordBRC = 0.0;
+
+            detailedRes = "";
+            ArrayList<DatasetInstance> abstractMRList = new ArrayList<>();
+            HashSet<String> reportedAbstractMRs = new HashSet<>();
+            testingData.stream().filter((di) -> (!reportedAbstractMRs.contains(di.getMeaningRepresentation().getAbstractMR()))).map((di) -> {
+                reportedAbstractMRs.add(di.getMeaningRepresentation().getAbstractMR());
+                return di;
+            }).forEachOrdered((di) -> {
+                boolean isInTraining = false;
+                for (DatasetInstance di2 : getTrainingData()) {
+                    if (di2.getMeaningRepresentation().getAbstractMR().equals(di.getMeaningRepresentation().getAbstractMR())) {
+                        isInTraining = true;
+                    }
+                }
+                if (!isInTraining) {
+                    for (DatasetInstance di2 : getValidationData()) {
+                        if (di2.getMeaningRepresentation().getAbstractMR().equals(di.getMeaningRepresentation().getAbstractMR())) {
+                            isInTraining = true;
+                        }
+                    }
+                }
+                if (!isInTraining) {
+                    abstractMRList.add(di);
+                }
+            });
+            for (DatasetInstance di : abstractMRList) {
+                Double bestROUGE = -100.0;
+                Double bestBLEU = -100.0;
+                Double bestCover = -100.0;
+                Double bestHarmonicMean = -100.0;
+                String predictedString = predictedWordSequences_overAllPredicates.get(di);
+                reportedAbstractMRs.add(di.getMeaningRepresentation().getAbstractMR());
+                double maxRouge = 0.0;
+                String predictedWordSequence = predictedString.replaceAll("\\?", " \\? ").replaceAll(":", " : ").replaceAll("\\.", " \\. ").replaceAll(",", " , ").replaceAll("  ", " ").trim();
+                for (String ref : finalReferencesWordSequences.get(di)) {
+                    double rouge = Rouge.ROUGE_N(predictedWordSequence, ref, 4);
+                    if (rouge > maxRouge) {
+                        maxRouge = rouge;
+                    }
+                }
+
+                double BLEUSmooth = BLEUMetric.computeLocalSmoothScore(predictedWordSequence, finalReferencesWordSequences.get(di), 4);
+                double cover = 1.0 - attrCoverage.get(predictedString);
+                double harmonicMean = 3.0 / (1.0 / BLEUSmooth + 1.0 / maxRouge + 1.0 / cover);
+
+                if (harmonicMean > bestHarmonicMean) {
+                    bestROUGE = maxRouge;
+                    bestBLEU = BLEUSmooth;
+                    bestCover = cover;
+                    bestHarmonicMean = harmonicMean;
+                }
+
+                uniqueMRsInTestAndNotInTrainAllPredWordBLEU += bestBLEU;
+                uniqueMRsInTestAndNotInTrainAllPredWordROUGE += bestROUGE;
+                uniqueMRsInTestAndNotInTrainAllPredWordCOVERAGEERR += bestCover;
+                uniqueMRsInTestAndNotInTrainAllPredWordBRC += bestHarmonicMean;
+            }
+            uniqueMRsInTestAndNotInTrainAllPredWordBLEU /= abstractMRList.size();
+            uniqueMRsInTestAndNotInTrainAllPredWordROUGE /= abstractMRList.size();
+            uniqueMRsInTestAndNotInTrainAllPredWordCOVERAGEERR /= abstractMRList.size();
+            uniqueMRsInTestAndNotInTrainAllPredWordBRC /= abstractMRList.size();
+            System.out.println("UNIQUE (NOT IN TRAIN) WORD ALL PRED BLEU: \t" + uniqueMRsInTestAndNotInTrainAllPredWordBLEU);
+            System.out.println("UNIQUE (NOT IN TRAIN) WORD ALL PRED ROUGE: \t" + uniqueMRsInTestAndNotInTrainAllPredWordROUGE);
+            System.out.println("UNIQUE (NOT IN TRAIN) WORD ALL PRED COVERAGE ERROR: \t" + (1.0 - uniqueMRsInTestAndNotInTrainAllPredWordCOVERAGEERR));
+            System.out.println("UNIQUE (NOT IN TRAIN) WORD ALL PRED BRC: \t" + uniqueMRsInTestAndNotInTrainAllPredWordBRC);
+
+            abstractMRList.forEach((di) -> {
+                System.out.println(di.getMeaningRepresentation().getAbstractMR() + "\t" + predictedWordSequences_overAllPredicates.get(di));
+            });
+            System.out.println("TOTAL SET SIZE: \t" + abstractMRList.size());
+            //System.out.println(abstractMRList);  
+            //System.out.println(detailedRes);
+        }
+        ArrayList<String> bestPredictedStrings = new ArrayList<>();
+        ArrayList<String> bestPredictedStringsMRs = new ArrayList<>();
+        double uniqueAllPredWordBLEU = 0.0;
+        double uniqueAllPredWordROUGE = 0.0;
+        double uniqueAllPredWordCOVERAGEERR = 0.0;
+        double uniqueAllPredWordBRC = 0.0;
+
+        HashSet<String> reportedAbstractMRs = new HashSet<>();
+        for (DatasetInstance di : testingData) {
+            if (!reportedAbstractMRs.contains(di.getMeaningRepresentation().getAbstractMR())) {
+                String bestPredictedString = "";
+                Double bestROUGE = -100.0;
+                Double bestBLEU = -100.0;
+                Double bestCover = -100.0;
+                Double bestHarmonicMean = -100.0;
+                String predictedString = predictedWordSequences_overAllPredicates.get(di);
+                reportedAbstractMRs.add(di.getMeaningRepresentation().getAbstractMR());
+                double maxRouge = 0.0;
+                String predictedWordSequence = predictedString.replaceAll("\\?", " \\? ").replaceAll(":", " : ").replaceAll("\\.", " \\. ").replaceAll(",", " , ").replaceAll("  ", " ").trim();
+                for (String ref : finalReferencesWordSequences.get(di)) {
+                    double rouge = Rouge.ROUGE_N(predictedWordSequence, ref, 4);
+                    if (rouge > maxRouge) {
+                        maxRouge = rouge;
+                    }
+                }
+
+                double BLEUSmooth = BLEUMetric.computeLocalSmoothScore(predictedWordSequence, finalReferencesWordSequences.get(di), 4);
+                double cover = 1.0 - attrCoverage.get(predictedString);
+                double harmonicMean = 3.0 / (1.0 / BLEUSmooth + 1.0 / maxRouge + 1.0 / cover);
+
+                if (harmonicMean > bestHarmonicMean) {
+                    bestPredictedString = predictedString;
+                    bestROUGE = maxRouge;
+                    bestBLEU = BLEUSmooth;
+                    bestCover = cover;
+                    bestHarmonicMean = harmonicMean;
+                }
+                bestPredictedStrings.add(bestPredictedString);
+                bestPredictedStringsMRs.add(di.getMeaningRepresentation().getMRstr());
+
+                uniqueAllPredWordBLEU += bestBLEU;
+                uniqueAllPredWordROUGE += bestROUGE;
+                uniqueAllPredWordCOVERAGEERR += bestCover;
+                uniqueAllPredWordBRC += bestHarmonicMean;
+            }
+            //}
+        }
+        if (isCalculateResultsPerPredicate()) {
+            uniqueAllPredWordBLEU /= reportedAbstractMRs.size();
+            uniqueAllPredWordROUGE /= reportedAbstractMRs.size();
+            uniqueAllPredWordCOVERAGEERR /= reportedAbstractMRs.size();
+            uniqueAllPredWordBRC /= reportedAbstractMRs.size();
+            System.out.println("UNIQUE WORD ALL PRED BLEU: \t" + uniqueAllPredWordBLEU);
+            System.out.println("UNIQUE WORD ALL PRED ROUGE: \t" + uniqueAllPredWordROUGE);
+            System.out.println("UNIQUE WORD ALL PRED COVERAGE ERROR: \t" + (1.0 - uniqueAllPredWordCOVERAGEERR));
+            System.out.println("UNIQUE WORD ALL PRED BRC: \t" + uniqueAllPredWordBRC);
+            System.out.println(detailedRes);
+            System.out.println("TOTAL: \t" + reportedAbstractMRs.size());
+
+            ////////////////////////
+            for (String predicate : getPredicates()) {
+                detailedRes = "";
+                bestPredictedStrings = new ArrayList<>();
+                bestPredictedStringsMRs = new ArrayList<>();
+                double uniquePredWordBLEU = 0.0;
+                double uniquePredWordROUGE = 0.0;
+                double uniquePredWordCOVERAGEERR = 0.0;
+                double uniquePredWordBRC = 0.0;
+
+                reportedAbstractMRs = new HashSet<>();
+                for (DatasetInstance di : testingData) {
+                    if (di.getMeaningRepresentation().getPredicate().equals(predicate)
+                            && !reportedAbstractMRs.contains(di.getMeaningRepresentation().getAbstractMR())) {
+                        String bestPredictedString = "";
+                        Double bestROUGE = -100.0;
+                        Double bestBLEU = -100.0;
+                        Double bestCover = -100.0;
+                        Double bestHarmonicMean = -100.0;
+
+                        String predictedString = predictedWordSequences_overAllPredicates.get(di);
+                        reportedAbstractMRs.add(di.getMeaningRepresentation().getAbstractMR());
+                        double maxRouge = 0.0;
+                        String predictedWordSequence = predictedString.replaceAll("\\?", " \\? ").replaceAll(":", " : ").replaceAll("\\.", " \\. ").replaceAll(",", " , ").replaceAll("  ", " ").trim();
+                        for (String ref : finalReferencesWordSequences.get(di)) {
+                            double rouge = Rouge.ROUGE_N(predictedWordSequence, ref, 4);
+                            if (rouge > maxRouge) {
+                                maxRouge = rouge;
+                            }
+                        }
+
+                        double BLEUSmooth = BLEUMetric.computeLocalSmoothScore(predictedWordSequence, finalReferencesWordSequences.get(di), 4);
+                        double cover = 1.0 - attrCoverage.get(predictedString);
+                        double harmonicMean = 3.0 / (1.0 / BLEUSmooth + 1.0 / maxRouge + 1.0 / cover);
+
+                        if (harmonicMean > bestHarmonicMean) {
+                            bestPredictedString = predictedString;
+                            bestROUGE = maxRouge;
+                            bestBLEU = BLEUSmooth;
+                            bestCover = cover;
+                            bestHarmonicMean = harmonicMean;
+                        }
+                        bestPredictedStrings.add(bestPredictedString);
+                        bestPredictedStringsMRs.add(di.getMeaningRepresentation().getMRstr());
+
+                        uniquePredWordBLEU += bestBLEU;
+                        uniquePredWordROUGE += bestROUGE;
+                        uniquePredWordCOVERAGEERR += bestCover;
+                        uniquePredWordBRC += bestHarmonicMean;
+                    }
+                }
+
+                uniquePredWordBLEU /= reportedAbstractMRs.size();
+                uniquePredWordROUGE /= reportedAbstractMRs.size();
+                uniquePredWordCOVERAGEERR /= reportedAbstractMRs.size();
+                uniquePredWordBRC /= reportedAbstractMRs.size();
+                System.out.println("UNIQUE WORD " + predicate + " BLEU: \t" + uniquePredWordBLEU);
+                System.out.println("UNIQUE WORD " + predicate + " ROUGE: \t" + uniquePredWordROUGE);
+                System.out.println("UNIQUE WORD " + predicate + " COVERAGE ERROR: \t" + (1.0 - uniquePredWordCOVERAGEERR));
+                System.out.println("UNIQUE WORD " + predicate + " BRC: \t" + uniquePredWordBRC);
+                System.out.println(detailedRes);
+                System.out.println("TOTAL " + predicate + ": \t" + reportedAbstractMRs.size());
+            }
+        }
+
+        if (isCalculateResultsPerPredicate()) {
+            BufferedWriter bw = null;
+            File f = null;
+            try {
+                f = new File("results/E2E"  + "TextsAfter" + (epoch) + "_" + JLOLS.sentenceCorrectionFurtherSteps + "_" + JLOLS.p + "epochsTESTINGDATA.txt");
+            } catch (NullPointerException e) {
+            }
+
+            try {
+                bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(f)));
+            } catch (FileNotFoundException e) {
+            }
+
+            try {
+                bw.write("BLEU:" + bleuScore);
+                bw.write("\n");
+            } catch (IOException e) {
+            }
+            for (int i = 0; i < bestPredictedStrings.size(); i++) {
+                try {
+                    String mr = bestPredictedStringsMRs.get(i);
+                    bw.write("MR;" + mr.replaceAll(";", ",") + ";");
+                    
+
+                    bw.write("\n");
+                } catch (IOException e) {
+                }
+            }
+
+            try {
+                bw.close();
+            } catch (IOException e) {
+            }
+        }
+        return bleuScore;
+    }
+		
+		
+
 
 	@Override
 	public void createNaiveAlignments(ArrayList<DatasetInstance> trainingData) {
@@ -1039,7 +1717,7 @@ public class E2E extends DatasetParser {
                     
                     //System.out.println("-1: " + randomRealization);
                     randomRealization.stream().filter((a) -> (a.getWord().startsWith(Action.TOKEN_X))).forEachOrdered((a) -> {
-                        String attr = a.getWord().substring(3).toLowerCase().trim();
+                        String attr = a.getWord().substring(3, a.getWord().lastIndexOf('_')).toLowerCase().trim();
                         a.setAttribute(attr + "=" + a.getWord());
                     });/*
                     HashSet<String> unalignedNoValueAttrs = new HashSet<>();
@@ -2317,8 +2995,143 @@ public class E2E extends DatasetParser {
 	@Override
 	public String postProcessWordSequence(DatasetInstance di, ArrayList<Action> wordSequence) {
 		
-		return null;
+		HashSet<ArrayList<Action>> matched = new HashSet<>();
+        ArrayList<Action> processedWordSequence = new ArrayList<>();
+        wordSequence.forEach((act) -> {
+            processedWordSequence.add(new Action(act));
+        });
+        if (!processedWordSequence.isEmpty()
+                && processedWordSequence.get(processedWordSequence.size() - 1).getWord().equals(Action.TOKEN_END)
+                && processedWordSequence.get(processedWordSequence.size() - 1).getAttribute().equals(Action.TOKEN_END)) {
+            processedWordSequence.remove(processedWordSequence.size() - 1);
+        }
+        if (getPunctuationPatterns().containsKey(di.getMeaningRepresentation().getPredicate())) {
+            getPunctuationPatterns().get(di.getMeaningRepresentation().getPredicate()).keySet().forEach((surrounds) -> {
+                int beforeNulls = 0;
+                if (surrounds.get(0) == null) {
+                    beforeNulls++;
+                }
+                if (surrounds.get(1) == null) {
+                    beforeNulls++;
+                }
+                for (int i = 0 - beforeNulls; i < processedWordSequence.size(); i++) {
+                    boolean matches = true;
+                    int m = 0;
+                    for (int s = 0; s < surrounds.size(); s++) {
+                        if (surrounds.get(s) != null) {
+                            if (i + s < processedWordSequence.size()) {
+                                if (!processedWordSequence.get(i + s).getWord().equals(surrounds.get(s).getWord()) /*|| !cleanActionList.get(i).getAttribute().equals(surrounds.get(s).getAttribute())*/) {
+                                    matches = false;
+                                    s = surrounds.size();
+                                } else {
+                                    m++;
+                                }
+                            } else {
+                                matches = false;
+                                s = surrounds.size();
+                            }
+                        } else if (s < 2 && i + s >= 0) {
+                            matches = false;
+                            s = surrounds.size();
+                        } else if (s >= 2 && i + s < processedWordSequence.size()) {
+                            matches = false;
+                            s = surrounds.size();
+                        }
+                    }
+                    if (matches && m > 0) {
+                        matched.add(surrounds);
+                        processedWordSequence.add(i + 2, getPunctuationPatterns().get(di.getMeaningRepresentation().getPredicate()).get(surrounds));
+                    }
+                }
+            });
+        }
+        boolean isLastPunct = true;
+        if (processedWordSequence.contains(new Action("and", ""))) {
+            for (int i = processedWordSequence.size() - 1; i > 0; i--) {
+                if (processedWordSequence.get(i).getWord().equals(",")
+                        && isLastPunct) {
+                    isLastPunct = false;
+                    processedWordSequence.get(i).setWord("and");
+                } else if (processedWordSequence.get(i).getWord().equals("and")
+                        && isLastPunct) {
+                    isLastPunct = false;
+                } else if (processedWordSequence.get(i).getWord().equals("and")
+                        && !isLastPunct) {
+                    processedWordSequence.get(i).setWord(",");
+                }
+            }
+        }
+
+        ArrayList<Action> cleanActionList = new ArrayList<>();
+        processedWordSequence.stream().filter((action) -> (!action.getWord().equals(Action.TOKEN_START)
+                && !action.getWord().equals(Action.TOKEN_END))).forEachOrdered((action) -> {
+            cleanActionList.add(action);
+        });
+
+        String predictedWordSequence = " ";
+        boolean previousIsTokenX = false;
+        for (Action action : cleanActionList) {
+            if (action.getWord().startsWith(Action.TOKEN_X)) {
+                predictedWordSequence += " " + di.getMeaningRepresentation().getDelexicalizationMap().get(action.getWord());
+                previousIsTokenX = true;
+            } else {
+                if (action.getWord().equals("-ly") && previousIsTokenX) {
+                    predictedWordSequence += "ly";
+                } else if (action.getWord().equals("s") && previousIsTokenX) {
+                    predictedWordSequence += action.getWord();
+                } else {
+                    predictedWordSequence += " " + action.getWord();
+                }
+                previousIsTokenX = false;
+            }
+        }
+
+        predictedWordSequence = predictedWordSequence.trim();
+        if (di.getMeaningRepresentation().getPredicate().startsWith("?")
+                && !predictedWordSequence.endsWith("?")) {
+            if (predictedWordSequence.endsWith(".")) {
+                predictedWordSequence = predictedWordSequence.substring(0, predictedWordSequence.length() - 1);
+            }
+            predictedWordSequence = predictedWordSequence.trim() + "?";
+        } else if (!predictedWordSequence.endsWith(".") && !predictedWordSequence.endsWith("?")) {
+            /*if (predictedWordSequence.endsWith("?")) {
+                predictedWordSequence = predictedWordSequence.substring(0, predictedWordSequence.length() - 1);
+            }*/
+            predictedWordSequence = predictedWordSequence.trim() + ".";
+        }
+        predictedWordSequence = predictedWordSequence.replaceAll(" the the ", " the ").replaceAll("\\?", " \\? ").replaceAll(":", " : ").replaceAll("\\.", " \\. ").replaceAll(",", " , ").replaceAll("  ", " ").trim();
+        predictedWordSequence = predictedWordSequence.replaceAll(" , \\. ", " \\. ").replaceAll(" and \\. ", " \\. ").replaceAll(" , \\? ", " \\? ").replaceAll(" and \\? ", " \\? ").replaceAll(" ,\\. ", " \\. ").replaceAll(" and\\. ", " \\. ").replaceAll(" ,\\? ", " \\? ").replaceAll(" and\\? ", " \\? ").trim();
+        /*for (String comp : sillyCompositeWordsInData.keySet()) {
+            predictedWordSequence = predictedWordSequence.replaceAll(comp, sillyCompositeWordsInData.get(comp));
+        }*/
+        if (predictedWordSequence.startsWith(",")
+                || predictedWordSequence.startsWith(".")
+                || predictedWordSequence.startsWith("?")) {
+            predictedWordSequence = predictedWordSequence.substring(1).trim();
+        }
+        if (predictedWordSequence.startsWith(",")) {
+            System.out.println(wordSequence);
+            System.out.println(matched);
+        }
+        return predictedWordSequence;
 	}
+	public ArrayList<String> getPredictedAttrList(ArrayList<Action> wordSequence) {
+        ArrayList<Action> cleanActionList = new ArrayList<>();
+        wordSequence.stream().filter((action) -> (!action.getWord().equals(Action.TOKEN_START)
+                && !action.getWord().equals(Action.TOKEN_END))).forEachOrdered((action) -> {
+            cleanActionList.add(action);
+        });
+
+        ArrayList<String> predictedAttrList = new ArrayList<>();
+        cleanActionList.forEach((action) -> {
+            if (predictedAttrList.isEmpty()) {
+                predictedAttrList.add(action.getAttribute());
+            } else if (!predictedAttrList.get(predictedAttrList.size() - 1).equals(action.getAttribute())) {
+                predictedAttrList.add(action.getAttribute());
+            }
+        });
+        return predictedAttrList;
+    }
 
 	@Override
 	public String postProcessRef(MeaningRepresentation mr, ArrayList<Action> refSeq) {
@@ -2342,15 +3155,85 @@ public class E2E extends DatasetParser {
 	public boolean loadInitClassifiers(int dataSize, HashMap<String, JAROW> trainedAttrClassifiers_0,
 			HashMap<String, HashMap<String, JAROW>> trainedWordClassifiers_0) {
 		
-		return false;
+		String file1 = "cache/attrInitClassifiers" +  "_" + dataSize;
+        String file2 = "cache/wordInitClassifiers" +  "_" + dataSize;
+        FileInputStream fin1 = null;
+        ObjectInputStream ois1 = null;
+        FileInputStream fin2 = null;
+        ObjectInputStream ois2 = null;
+        if ((new File(file1)).exists()
+                && (new File(file2)).exists()) {
+            try {
+                System.out.print("Load initial classifiers...");
+                fin1 = new FileInputStream(file1);
+                ois1 = new ObjectInputStream(fin1);
+                Object o1 = ois1.readObject();
+                if (o1 instanceof HashMap) {
+                    trainedAttrClassifiers_0.putAll((Map<? extends String, ? extends JAROW>) o1);
+                }
+
+                fin2 = new FileInputStream(file2);
+                ois2 = new ObjectInputStream(fin2);
+                Object o2 = ois2.readObject();
+                if (o2 instanceof HashMap) {
+                    trainedWordClassifiers_0.putAll((Map<? extends String, ? extends HashMap<String, JAROW>>) o2);
+                }
+
+            } catch (ClassNotFoundException | IOException ex) {
+            } finally {
+                try {
+                    fin1.close();
+                    fin2.close();
+                } catch (IOException ex) {
+                }
+                try {
+                    ois1.close();
+                    ois2.close();
+                } catch (IOException ex) {
+                }
+            }
+        } else {
+            return false;
+        }
+        return true;
 	}
 
 	@Override
 	public void writeInitClassifiers(int dataSize, HashMap<String, JAROW> trainedAttrClassifiers_0,
 			HashMap<String, HashMap<String, JAROW>> trainedWordClassifiers_0) {
+		String file1 = "cache/attrInitClassifiers" + "_" + dataSize;
+        String file2 = "cache/wordInitClassifiers" + "_" + dataSize;
+        FileOutputStream fout1 = null;
+        ObjectOutputStream oos1 = null;
+        FileOutputStream fout2 = null;
+        ObjectOutputStream oos2 = null;
+        try {
+            System.out.print("Write initial classifiers...");
+            fout1 = new FileOutputStream(file1);
+            oos1 = new ObjectOutputStream(fout1);
+            oos1.writeObject(trainedAttrClassifiers_0);
+
+            fout2 = new FileOutputStream(file2);
+            oos2 = new ObjectOutputStream(fout2);
+            oos2.writeObject(trainedWordClassifiers_0);
+
+        } catch (IOException ex) {
+        } finally {
+            try {
+                fout1.close();
+                fout2.close();
+            } catch (IOException ex) {
+            }
+            try {
+                oos1.close();
+                oos2.close();
+            } catch (IOException ex) {
+            }
+        }
+    }
 		
 		
-	}
+	
 
 }
 class InferE2EVectorsThread extends Thread {
