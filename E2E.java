@@ -218,16 +218,16 @@ public class E2E extends DatasetParser {
         	}
         	if(RefPart.contains("@x@nears")){
         		RefPart = RefPart.replace("@x@nears", "@x@near s");
-        	}*/
+        	}
         	if(RefPart.contains("@x@name_0s")){
         		RefPart = RefPart.replace("@x@name_0s", "@x@name_0 s");
         	}
         	if(RefPart.contains("@x@near_0s")){
         		RefPart = RefPart.replace("@x@near_0s", "@x@near_0 s");
-        	}
+        	}*/
         	
         	// create MR for each instance 
-        	MeaningRepresentation MR = new MeaningRepresentation(singlePredicate,attributeValues,MRPart,delexicalizedMap);
+        	//MeaningRepresentation MR = new MeaningRepresentation(singlePredicate,attributeValues,MRPart,delexicalizedMap);
         	// start create the value alignments
         	ArrayList<String> observedAttrValueSequence = new ArrayList<>();
             ArrayList<String> observedWordSequence = new ArrayList<>();
@@ -236,14 +236,19 @@ public class E2E extends DatasetParser {
             String[] words = RefPart.split(" ");
             for(String w: words){
             	if(w.contains("@x@name_0)")&&!w.equals("@x@name_0")){
+            		delexicalizedMap.put("@x@name_0", w);
             		w = "@x@name_0";
+            		
+            		
             	}
             	if(w.contains("@x@near_0")&&!w.equals("@x@near_0")){
+            		delexicalizedMap.put("@x@near_0", w);
             		w = "@x@near_0";
             	}
             	observedWordSequence.add(w.trim());
             }
-            
+            MeaningRepresentation MR = new MeaningRepresentation(singlePredicate,attributeValues,MRPart,delexicalizedMap);
+
          // We store the maximum observed word sequence length, to use as a limit during generation
             if (observedWordSequence.size() > getMaxWordSequenceLength()) {
                 setMaxWordSequenceLength(observedWordSequence.size());
@@ -767,10 +772,13 @@ public class E2E extends DatasetParser {
         }/*
         getTrainingData().forEach((di)->{
         	for(Action a: di.getDirectReferenceSequence()){
-        		System.out.print(a.getAttribute()+"#"+a.getWord()+" ");
+        		if(a.getWord().equals(Action.TOKEN_PUNCT)||a.getAttribute().equals(Action.TOKEN_PUNCT)){
+        			System.out.println(di.getDirectReference());
+        			System.exit(0);
+        		}
         	}
-        	System.out.println("");
-        });*/	
+        	
+        });	*/
         
 	}
 	
@@ -1936,7 +1944,7 @@ public class E2E extends DatasetParser {
             di.setDirectReferenceSequence(calculatedRealizationsCache.get(di.getDirectReferenceSequence()));
             return di;
         }).forEachOrdered((di) -> {
-        	/*
+        	
             HashSet<String> attrValuesToBeMentioned = new HashSet<>();
             di.getMeaningRepresentation().getAttributeValues().keySet().forEach((attribute) -> {
                 int a = 0;
@@ -1954,7 +1962,7 @@ public class E2E extends DatasetParser {
                 attrValuesToBeMentioned.remove(key.getAttribute());//not aligned in the realization
                 return key;
             });
-            */
+            
         });
         punctRealizations.keySet().forEach((di) -> {
             ArrayList<Action> punctRealization = punctRealizations.get(di);
@@ -3138,7 +3146,8 @@ public class E2E extends DatasetParser {
 		String cleanedWords = "";
 		for(Action nlWord: refSeq){
 			if(!nlWord.equals(new Action(Action.TOKEN_END,""))
-					||!nlWord.equals(new Action(Action.TOKEN_START,""))){
+					&&!nlWord.equals(new Action(Action.TOKEN_START,""))
+					&&!nlWord.getWord().equals(Action.TOKEN_PUNCT)){
 				if(nlWord.getWord().startsWith(Action.TOKEN_X)){
 					cleanedWords+= " " + mr.getDelexicalizationMap().get(nlWord.getWord());
 				}
