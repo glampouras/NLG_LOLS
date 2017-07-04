@@ -80,13 +80,17 @@ public class E2E extends DatasetParser {
         System.out.println("Training data size: " + getTrainingData().size());
         System.out.println("Validation data size: " + getValidationData().size());
         
-        //getTrainingData().forEach((di)->{
+        getTrainingData().forEach((di)->{
+        	for(Action a : di.getDirectReferenceSequence()){
+        		
+        		if(!a.getAttribute().equals(Action.TOKEN_PUNCT)&&a.getWord().matches("[,.]")){
+        			//System.out.println(di.getDirectReferenceSequence());
+        			
+        		}
+        	}
         	
-        	//for(Action a: di.getDirectReferenceSequence()){
-        	//	System.out.print(a.getWord()+" ");
-        	//}
-        	//System.out.println("");
-        //});
+        	
+        });
 		
 		
 		
@@ -192,13 +196,17 @@ public class E2E extends DatasetParser {
         	}
         	
         	
-        	
+        	//RefPart = " "+RefPart+" ";
         	for(String deValue: delexicalizedMap.keySet()){
         		String value = delexicalizedMap.get(deValue);
         		if(RefPart.contains(value)){
-        			RefPart = RefPart.replace(value, deValue);
+        			RefPart = RefPart.replace(value, deValue).trim();
         		}
         	}
+        	//if(!RefPart.contains("@x@name_0")&&!RefPart.contains("@x@near_0")){
+        		//System.out.println(RefPart);
+        		
+        	//}
         	
         	/*
         	if(RefPart.contains("name-")){
@@ -232,8 +240,9 @@ public class E2E extends DatasetParser {
         	ArrayList<String> observedAttrValueSequence = new ArrayList<>();
             ArrayList<String> observedWordSequence = new ArrayList<>();
             // replace the punctuation in the reference
-            RefPart = RefPart.replaceAll("[.,?:;!'-]", " "+Action.TOKEN_PUNCT+" ");
-            String[] words = RefPart.split(" ");
+            //RefPart = RefPart.replaceAll("[.,?:;!'-]", " "+Action.TOKEN_PUNCT+" ");
+            //String[] words = RefPart.replaceAll("[.,?:;!'-]", " "+Action.TOKEN_PUNCT+" ").split(" ");
+            String[] words = RefPart.replaceAll("[.,?:;!'-]", " $0 ").split("\\s+");
             for(String w: words){
             	if(w.contains("@x@name_0)")&&!w.equals("@x@name_0")){
             		delexicalizedMap.put("@x@name_0", w);
@@ -257,7 +266,7 @@ public class E2E extends DatasetParser {
             ArrayList<String> wordToAttrValueAlignment = new ArrayList<>();
             for(String w: observedWordSequence){
             	
-            	if(w.equals(Action.TOKEN_PUNCT)){
+            	if(w.trim().matches("[.,?:;!']")){
             		wordToAttrValueAlignment.add(Action.TOKEN_PUNCT);
             	}
             	else{
@@ -285,12 +294,12 @@ public class E2E extends DatasetParser {
             	.forEachOrdered((value)->{
             		String valueToCompare = value;
             		if(valueToCompare.contains("familyfriendly")){
-            			valueToCompare = valueToCompare.replace("familyfriendly", "family_friendly");
+            			valueToCompare = valueToCompare.replace("familyfriendly", "family friendly");
             		}
             		observedValueAlignments.put(valueToCompare, new HashMap<String, Double>());
             		// n grams 
                     for (int n = 1; n < observedWordSequence.size(); n++) {
-                        //Calculate the similaritie between them and valueToCompare
+                        //Calculate the similarities between them and valueToCompare
                         for (int r = 0; r <= observedWordSequence.size() - n; r++) {
                         	boolean compareAgainstNGram = true;
                         	for (int j = 0; j < n; j++) {
@@ -769,16 +778,16 @@ public class E2E extends DatasetParser {
                 });
             });
             writeTrainingData(getTrainingData().size());
-        }/*
+        }
         getTrainingData().forEach((di)->{
         	for(Action a: di.getDirectReferenceSequence()){
-        		if(a.getWord().equals(Action.TOKEN_PUNCT)||a.getAttribute().equals(Action.TOKEN_PUNCT)){
-        			System.out.println(di.getDirectReference());
-        			System.exit(0);
+        		if(a.getWord().matches("[,.]")){
+        			//System.out.println(di.getDirectReferenceSequence());
         		}
+        		continue;
         	}
         	
-        });	*/
+        });	
         
 	}
 	
@@ -1167,6 +1176,7 @@ public class E2E extends DatasetParser {
                                             }
 
                                             predictedActionList.add(new Action(predictedWord, attrValue));
+                                            
                                             if (!predictedWord.equals(Action.TOKEN_START)
                                                     && !predictedWord.equals(Action.TOKEN_END)) {
                                                 subPhrase.add(predictedWord);
@@ -1273,8 +1283,9 @@ public class E2E extends DatasetParser {
             predictedAttrValues.forEach((attributeValuePair) -> {
                 predictedAttrs.add(attributeValuePair.split("=")[0]);
             });
-
+            
             String predictedWordSequence = postProcessWordSequence(di, predictedActionList);
+           
             System.out.println(predictedWordSequence);
             System.out.println(di.getDirectReference());
             System.out.println("");
@@ -1641,12 +1652,16 @@ public class E2E extends DatasetParser {
                 ArrayList<Action> randomRealization = new ArrayList<>();
                 for (int i = 0; i < realization.size(); i++) {
                     Action a = realization.get(i);
-                    if (a.getAttribute().equals(Action.TOKEN_PUNCT)) {
+                    if (a.getAttribute().equals(Action.TOKEN_PUNCT)||a.getWord().matches("[:,.?!;]")) {
+                    
                         randomRealization.add(new Action(a.getWord(), a.getAttribute()));//only record the punct
                     } else {
                         randomRealization.add(new Action(a.getWord(), ""));
                     }
+                    
+                    
                 }
+                
                 if (values.keySet().isEmpty()) {
                     for (int i = 0; i < randomRealization.size(); i++) {
                         if (randomRealization.get(i).getAttribute().isEmpty() || randomRealization.get(i).getAttribute().equals("[]")) {
@@ -1662,7 +1677,10 @@ public class E2E extends DatasetParser {
                     values.keySet().forEach((attr) -> {
                         values.get(attr).stream().filter((value) -> ((! value.startsWith(Action.TOKEN_X))
                                 && !value.isEmpty())).map((value) -> {
-                            String valueToCheck = value;/*
+                            String valueToCheck = value;
+                            if(valueToCheck.contains("familyfriendly")){
+                            	valueToCheck = valueToCheck.replace("familyfriendly", "family friendly");
+                    		}/*
                             if (valueToCheck.equals("no")
                                     || valueToCheck.equals("yes")
                                     || valueToCheck.equals("yes or no")
@@ -1848,9 +1866,14 @@ public class E2E extends DatasetParser {
                     }
                 }*/
                 ArrayList<Action> cleanRandomRealization = new ArrayList<>();
-                randomRealization.stream().filter((a) -> (!a.getAttribute().equals(Action.TOKEN_PUNCT))).forEachOrdered((a) -> {
+                randomRealization.stream().filter((a) -> (!a.getAttribute().equals(Action.TOKEN_PUNCT))&&!a.getWord().matches("[,.:;'?!]")).forEachOrdered((a) -> {
                     cleanRandomRealization.add(a);//no punctuation in the action (clean) 
                 });
+                for(Action a : cleanRandomRealization){
+                	if(a.getWord().matches("[,.]")){
+                		System.exit(0);
+                	}
+                }
                 //ADD END TOKENS
                 ArrayList<Action> endRandomRealization = new ArrayList<>();
                 previousAttr = "";
@@ -1893,6 +1916,11 @@ public class E2E extends DatasetParser {
                 }
                 if (!punctRealization.get(punctRealization.size() - 1).getWord().equals(Action.TOKEN_END)) {
                     punctRealization.add(new Action(Action.TOKEN_END, previousAttr));
+                }
+                for(Action a : punctRealization){
+                	if(a.getWord().matches("[,.:;'?!]")){
+                		a.setAttribute(Action.TOKEN_PUNCT);
+                	}
                 }
                 return punctRealization;
             }).map((punctRealization) -> {
@@ -3156,6 +3184,10 @@ public class E2E extends DatasetParser {
 				}
 			}
 		}
+		if(!cleanedWords.trim().endsWith(".")){
+			cleanedWords+=" .";
+		}
+		
 		
 		return cleanedWords.trim();
 	}
