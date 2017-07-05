@@ -168,12 +168,14 @@ public class E2E extends DatasetParser {
         			// delexicalize name values
         			String delexValue = Action.TOKEN_X+attribute+"_0";
         			delexicalizedMap.put(delexValue, value);
+        			value = delexValue;
         			
         		}
         		if(attribute.equals("near")){
         			//delexicalize near values
         			String delexValue = Action.TOKEN_X+attribute+"_0";
         			delexicalizedMap.put(delexValue, value);
+        			value = delexValue;
         		}        		
         		if(value.equals("yes")||value.equals("no")){
         			
@@ -266,7 +268,7 @@ public class E2E extends DatasetParser {
             ArrayList<String> wordToAttrValueAlignment = new ArrayList<>();
             for(String w: observedWordSequence){
             	
-            	if(w.trim().matches("[.,?:;!']")){
+            	if(w.trim().matches("[.,?:;!'\"]")){
             		wordToAttrValueAlignment.add(Action.TOKEN_PUNCT);
             	}
             	else{
@@ -293,9 +295,9 @@ public class E2E extends DatasetParser {
             	MR.getAttributeValues().get(attr).stream().filter((value)->(!value.startsWith(Action.TOKEN_X)))
             	.forEachOrdered((value)->{
             		String valueToCompare = value;
-            		if(valueToCompare.contains("familyfriendly")){
-            			valueToCompare = valueToCompare.replace("familyfriendly", "family friendly");
-            		}
+            		//if(valueToCompare.contains("familyfriendly")){
+            			//valueToCompare = valueToCompare.replace("familyfriendly", "family friendly");
+            		//}
             		observedValueAlignments.put(valueToCompare, new HashMap<String, Double>());
             		// n grams 
                     for (int n = 1; n < observedWordSequence.size(); n++) {
@@ -331,7 +333,7 @@ public class E2E extends DatasetParser {
                                     distance = backwardDistance;
                                 }
                                 // We ignore all nGrams that are less similar than a threshold
-                                if (distance > 0.5) {
+                                if (distance > 0.3) {
                                     
                                    observedValueAlignments.get(valueToCompare).put(align, distance);
                                     
@@ -781,11 +783,10 @@ public class E2E extends DatasetParser {
         }
         getTrainingData().forEach((di)->{
         	for(Action a: di.getDirectReferenceSequence()){
-        		if(a.getWord().matches("[,.]")){
-        			//System.out.println(di.getDirectReferenceSequence());
-        		}
-        		continue;
+        		//System.out.print(a.getAttribute()+"###"+a.getWord()+"  ");
         	}
+        	//System.out.println("");
+        	//System.out.println(di.getDirectReference());
         	
         });	
         
@@ -1283,7 +1284,9 @@ public class E2E extends DatasetParser {
             predictedAttrValues.forEach((attributeValuePair) -> {
                 predictedAttrs.add(attributeValuePair.split("=")[0]);
             });
-            
+            //for(Action act : predictedActionList ){
+            	//System.out.print(act.getAttribute()+"###"+act.getWord()+"  ");
+            //}
             String predictedWordSequence = postProcessWordSequence(di, predictedActionList);
            
             System.out.println(predictedWordSequence);
@@ -1678,9 +1681,10 @@ public class E2E extends DatasetParser {
                         values.get(attr).stream().filter((value) -> ((! value.startsWith(Action.TOKEN_X))
                                 && !value.isEmpty())).map((value) -> {
                             String valueToCheck = value;
-                            if(valueToCheck.contains("familyfriendly")){
-                            	valueToCheck = valueToCheck.replace("familyfriendly", "family friendly");
-                    		}/*
+                            //if(valueToCheck.contains("familyfriendly")){
+                            	//valueToCheck = valueToCheck.replace("familyfriendly", "family friendly");
+                    		//}
+                                /*
                             if (valueToCheck.equals("no")
                                     || valueToCheck.equals("yes")
                                     || valueToCheck.equals("yes or no")
@@ -1869,11 +1873,7 @@ public class E2E extends DatasetParser {
                 randomRealization.stream().filter((a) -> (!a.getAttribute().equals(Action.TOKEN_PUNCT))&&!a.getWord().matches("[,.:;'?!]")).forEachOrdered((a) -> {
                     cleanRandomRealization.add(a);//no punctuation in the action (clean) 
                 });
-                for(Action a : cleanRandomRealization){
-                	if(a.getWord().matches("[,.]")){
-                		System.exit(0);
-                	}
-                }
+                
                 //ADD END TOKENS
                 ArrayList<Action> endRandomRealization = new ArrayList<>();
                 previousAttr = "";
