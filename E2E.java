@@ -16,6 +16,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -70,10 +71,12 @@ public class E2E extends DatasetParser {
         
         if (isResetStoredCaches() || !loadLists()) {
         	createLists(trainingDataFile);
-        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate).subList(0, 100));
+        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate).subList(0, 2000));
         	getDatasetInstances().put(singlePredicate,new ArrayList<>());
         	createLists(devDataFile);
-        	getValidationData().addAll(getDatasetInstances().get(singlePredicate));
+        	Collections.shuffle( getDatasetInstances().get(singlePredicate));
+        	getValidationData().addAll(getDatasetInstances().get(singlePredicate).subList(0, 100));
+        	
         	getDatasetInstances().get(singlePredicate).addAll(getTrainingData());
         	writeLists();
         }
@@ -83,10 +86,9 @@ public class E2E extends DatasetParser {
         getTrainingData().forEach((di)->{
         	for(Action a : di.getDirectReferenceSequence()){
         		
-        		if(!a.getAttribute().equals(Action.TOKEN_PUNCT)&&a.getWord().matches("[,.]")){
-        			//System.out.println(di.getDirectReferenceSequence());
-        			
-        		}
+        		if(a.getWord().contains(Action.TOKEN_X)&&!a.getWord().equals("@x@name_0")&&!a.getWord().equals("@x@near_0")){
+        			//System.out.println(a.getWord());
+        			        		}
         	}
         	
         	
@@ -205,6 +207,7 @@ public class E2E extends DatasetParser {
         			RefPart = RefPart.replace(value, deValue).trim();
         		}
         	}
+        	
         	//if(!RefPart.contains("@x@name_0")&&!RefPart.contains("@x@near_0")){
         		//System.out.println(RefPart);
         		
@@ -246,17 +249,27 @@ public class E2E extends DatasetParser {
             //String[] words = RefPart.replaceAll("[.,?:;!'-]", " "+Action.TOKEN_PUNCT+" ").split(" ");
             String[] words = RefPart.replaceAll("[.,?:;!'-]", " $0 ").split("\\s+");
             for(String w: words){
-            	if(w.contains("@x@name_0)")&&!w.equals("@x@name_0")){
-            		delexicalizedMap.put("@x@name_0", w);
+            	
+            	if(w.contains("@x@name_0")&&!w.matches("@x@name_0")){
+            		String realValue = delexicalizedMap.get("@x@name_0");
+            		realValue = w.replace("@x@name_0", realValue);
+            		delexicalizedMap.put("@x@name_0", realValue);
             		w = "@x@name_0";
             		
             		
             	}
             	if(w.contains("@x@near_0")&&!w.equals("@x@near_0")){
-            		delexicalizedMap.put("@x@near_0", w);
+            		String realValue = delexicalizedMap.get("@x@near_0");
+            		realValue = w.replace("@x@near_0", realValue);
+            		delexicalizedMap.put("@x@near_0", realValue);
             		w = "@x@near_0";
             	}
             	observedWordSequence.add(w.trim());
+            }
+            for(String a: observedWordSequence){
+            	if(a.equals("@x@name_0s")){
+            		System.out.println(observedWordSequence);
+            	}
             }
             MeaningRepresentation MR = new MeaningRepresentation(singlePredicate,attributeValues,MRPart,delexicalizedMap);
 
@@ -715,7 +728,7 @@ public class E2E extends DatasetParser {
         			availableWordActions.get(singlePredicate).put(attr.toLowerCase(), new HashSet<>());
         		}
         		di.getDirectReferenceSequence().stream().forEach((action)->{
-        			if(!action.getWord().equals(Action.TOKEN_PUNCT)&&
+        			if(!action.getAttribute().equals(Action.TOKEN_PUNCT)&&
         					!action.getWord().equals(Action.TOKEN_START)){
         				if (action.getWord().startsWith(Action.TOKEN_X)) {
                             if (action.getWord().substring(3, action.getWord().lastIndexOf('_')).toLowerCase().trim().equals(attr)) {
