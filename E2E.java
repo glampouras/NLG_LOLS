@@ -21,6 +21,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import edu.stanford.nlp.mt.metrics.BLEUMetric;
 import edu.stanford.nlp.mt.tools.NISTTokenizer;
@@ -71,7 +73,7 @@ public class E2E extends DatasetParser {
         
         if (isResetStoredCaches() || !loadLists()) {
         	createLists(trainingDataFile);
-        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate).subList(0, 2000));
+        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate).subList(0, 10));
         	getDatasetInstances().put(singlePredicate,new ArrayList<>());
         	createLists(devDataFile);
         	Collections.shuffle( getDatasetInstances().get(singlePredicate));
@@ -86,10 +88,9 @@ public class E2E extends DatasetParser {
         getTrainingData().forEach((di)->{
         	for(Action a : di.getDirectReferenceSequence()){
         		
-        		if(a.getWord().contains(Action.TOKEN_X)&&!a.getWord().equals("@x@name_0")&&!a.getWord().equals("@x@near_0")){
-        			//System.out.println(a.getWord());
-        			        		}
+        		//System.out.print(a.getAttribute()+" ###"+a.getWord()+" ");
         	}
+        	//System.out.println("");
         	
         	
         });
@@ -207,7 +208,7 @@ public class E2E extends DatasetParser {
         			RefPart = RefPart.replace(value, deValue).trim();
         		}
         	}
-        	
+        
         	//if(!RefPart.contains("@x@name_0")&&!RefPart.contains("@x@near_0")){
         		//System.out.println(RefPart);
         		
@@ -247,30 +248,92 @@ public class E2E extends DatasetParser {
             // replace the punctuation in the reference
             //RefPart = RefPart.replaceAll("[.,?:;!'-]", " "+Action.TOKEN_PUNCT+" ");
             //String[] words = RefPart.replaceAll("[.,?:;!'-]", " "+Action.TOKEN_PUNCT+" ").split(" ");
-            String[] words = RefPart.replaceAll("[.,?:;!'-]", " $0 ").split("\\s+");
+            String[] words = RefPart.replace(", ,", " , ").replace(". .", " . ").replaceAll("[.,?:;!'-]", " $0 ").split("\\s+");
             for(String w: words){
+            	if(w.contains("0f")){
+            		w = w.replace("0f", "of");
+            	}
             	
-            	if(w.contains("@x@name_0")&&!w.matches("@x@name_0")){
+            	Pattern p1 = Pattern.compile("([0-9]+)([a-z]+)");
+            	Matcher m1 = p1.matcher(w);
+            	Pattern p2 = Pattern.compile("([a-z]+)([0-9]+)");
+            	Matcher m2 = p2.matcher(w);
+            	Pattern p3 = Pattern.compile("(£)([a-z]+)");
+            	Matcher m3 = p3.matcher(w);
+            	Pattern p4 = Pattern.compile("([a-z]+)(£[0-9]+)");
+            	Matcher m4 = p4.matcher(w);
+            	Pattern p5 = Pattern.compile("([0-9]+)([a-z]+)([0-9]+)");
+            	Matcher m5 = p5.matcher(w);
+            	Pattern p6 = Pattern.compile("([0-9]+)(@x@[a-z]+_0)");
+            	Matcher m6 = p6.matcher(w);
+            	if(m1.find()){
+            		observedWordSequence.add(m1.group(1).trim());
+            		observedWordSequence.add(m1.group(2).trim());
+            		
+            	}
+            	
+            	
+            	else if(m2.find()){
+            		
+            		observedWordSequence.add(m2.group(1).trim());
+            		observedWordSequence.add(m2.group(2).trim());
+            		
+            	}
+            	
+            	
+            	else if(m3.find()){
+            		
+            		observedWordSequence.add(m3.group(1).trim());
+            		observedWordSequence.add(m3.group(2).trim());
+            		
+            	}
+            	
+            	
+            	else if(m4.find()){
+            		
+            		observedWordSequence.add(m4.group(1).trim());
+            		observedWordSequence.add(m4.group(2).trim());
+            		
+            	}
+            	
+            	
+            	else if(m5.find()){
+            		System.out.println(m5.group(0));
+            		observedWordSequence.add(m5.group(1).trim());
+            		observedWordSequence.add(m5.group(2).trim());
+            		observedWordSequence.add(m5.group(3).trim());
+            	}
+            	else if(m6.find()){
+            		
+            		observedWordSequence.add(m6.group(1).trim());
+            		observedWordSequence.add(m6.group(2).trim());
+            	}
+            		
+            	
+            	
+            	
+            	else if(w.contains("@x@name_0")&&!w.matches("@x@name_0")){
             		String realValue = delexicalizedMap.get("@x@name_0");
             		realValue = w.replace("@x@name_0", realValue);
             		delexicalizedMap.put("@x@name_0", realValue);
             		w = "@x@name_0";
-            		
+            		observedWordSequence.add(w.trim());
             		
             	}
-            	if(w.contains("@x@near_0")&&!w.equals("@x@near_0")){
+            	else if(w.contains("@x@near_0")&&!w.equals("@x@near_0")){
             		String realValue = delexicalizedMap.get("@x@near_0");
             		realValue = w.replace("@x@near_0", realValue);
             		delexicalizedMap.put("@x@near_0", realValue);
             		w = "@x@near_0";
+            		observedWordSequence.add(w.trim());
             	}
+            	
+            	
+            	else{
             	observedWordSequence.add(w.trim());
-            }
-            for(String a: observedWordSequence){
-            	if(a.equals("@x@name_0s")){
-            		System.out.println(observedWordSequence);
             	}
             }
+            
             MeaningRepresentation MR = new MeaningRepresentation(singlePredicate,attributeValues,MRPart,delexicalizedMap);
 
          // We store the maximum observed word sequence length, to use as a limit during generation
@@ -319,7 +382,7 @@ public class E2E extends DatasetParser {
                         	boolean compareAgainstNGram = true;
                         	for (int j = 0; j < n; j++) {
                         		if (observedWordSequence.get(r + j).startsWith(Action.TOKEN_X)
-                        				||observedWordSequence.get(r + j).equals(Action.TOKEN_PUNCT)
+                        				||wordToAttrValueAlignment.get(r+j).equals(Action.TOKEN_PUNCT)
                         				||observedWordSequence.get(r+j).isEmpty()){
                         			compareAgainstNGram = false;
                         			
@@ -796,12 +859,17 @@ public class E2E extends DatasetParser {
         }
         getTrainingData().forEach((di)->{
         	for(Action a: di.getDirectReferenceSequence()){
-        		//System.out.print(a.getAttribute()+"###"+a.getWord()+"  ");
+        		System.out.print(a.getAttribute()+"###"+a.getWord()+"  ");
         	}
-        	//System.out.println("");
-        	//System.out.println(di.getDirectReference());
+        	System.out.println("");
+        	//System.out.println(di.getMeaningRepresentation().getAbstractMR());
         	
         });	
+        for(String attr: getValueAlignments().keySet()){
+        	for(ArrayList<String> check :getValueAlignments().get(attr).keySet()){
+        		//System.out.println(attr+"  "+check+ "  "+ getValueAlignments().get(attr).get(check));
+        	}
+        }
         
 	}
 	
@@ -816,7 +884,7 @@ public class E2E extends DatasetParser {
         if ((new File(file1)).exists()
                 && (new File(file2)).exists()) {
             try {
-                System.out.print("Load training data...");
+                System.out.println("Load training data...");
                 fin1 = new FileInputStream(file1);
                 ois1 = new ObjectInputStream(fin1);
                 Object o1 = ois1.readObject();
@@ -1668,7 +1736,7 @@ public class E2E extends DatasetParser {
                 ArrayList<Action> randomRealization = new ArrayList<>();
                 for (int i = 0; i < realization.size(); i++) {
                     Action a = realization.get(i);
-                    if (a.getAttribute().equals(Action.TOKEN_PUNCT)||a.getWord().matches("[:,.?!;]")) {
+                    if (a.getAttribute().equals(Action.TOKEN_PUNCT)||a.getWord().matches("[:,.?!;']")) {
                     
                         randomRealization.add(new Action(a.getWord(), a.getAttribute()));//only record the punct
                     } else {
