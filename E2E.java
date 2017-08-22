@@ -14,10 +14,12 @@ import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -38,7 +40,23 @@ import jarow.Prediction;
 import similarity_measures.Levenshtein;
 import similarity_measures.Rouge;
 import simpleLM.SimpleLM;
+class ValueComparator implements Comparator<String> {
+    Map<String, Integer> base;
 
+    public ValueComparator(HashMap<String, Integer> wordDictionary) {
+        this.base = wordDictionary;
+    }
+
+    // Note: this comparator imposes orderings that are inconsistent with
+    // equals.
+    public int compare(String a, String b) {
+        if (base.get(a) >= base.get(b)) {
+            return -1;
+        } else {
+            return 1;
+        } // returning 0 would merge keys
+    }
+}
 public class E2E extends DatasetParser {
 	final String singlePredicate = "#PREDICATE";
 
@@ -51,7 +69,12 @@ public class E2E extends DatasetParser {
 		
 		E2E e2e = new E2E(args);
 		e2e.parseDataset();
+		long start_time  = System.currentTimeMillis();
+		
 		e2e.createTrainingData();
+		long end_time = System.currentTimeMillis();
+		long running_time = end_time-start_time;
+		System.out.println("running time is "+running_time );
 		e2e.performImitationLearning();
 		
 
@@ -73,11 +96,15 @@ public class E2E extends DatasetParser {
         
         if (isResetStoredCaches() || !loadLists()) {
         	createLists(trainingDataFile);
-        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate).subList(0, 10));
+        	getTrainingData().addAll(getDatasetInstances().get(singlePredicate)
+        			//.subList(0, 1000)
+        			);
         	getDatasetInstances().put(singlePredicate,new ArrayList<>());
         	createLists(devDataFile);
-        	Collections.shuffle( getDatasetInstances().get(singlePredicate));
-        	getValidationData().addAll(getDatasetInstances().get(singlePredicate).subList(0, 100));
+        	Collections.shuffle( getDatasetInstances().get(singlePredicate),new Random(123));
+        	getValidationData().addAll(getDatasetInstances().get(singlePredicate)
+        			//.subList(0, 100)
+        			);
         	
         	getDatasetInstances().get(singlePredicate).addAll(getTrainingData());
         	writeLists();
@@ -85,21 +112,16 @@ public class E2E extends DatasetParser {
         System.out.println("Training data size: " + getTrainingData().size());
         System.out.println("Validation data size: " + getValidationData().size());
         
-        getTrainingData().forEach((di)->{
-        	for(Action a : di.getDirectReferenceSequence()){
-        		
-        		//System.out.print(a.getAttribute()+" ###"+a.getWord()+" ");
-        	}
-        	//System.out.println("");
-        	
-        	
-        });
+        
+       
 		
 		
 		
 	}
 	public void createLists(File  dataFile){
 		System.out.println("create lists");
+		
+		
         ArrayList<String> dataPart = new ArrayList<>();
         
         //we read in the data from the data files.
@@ -143,7 +165,14 @@ public class E2E extends DatasetParser {
         // for each instance    
         int num=0;
         for(String line : dataPart){
+        	
         	//System.out.println(num);
+        	num++; 
+        	
+        	
+        	
+        	
+        	
            	String MRPart = line.split("\",")[0];
         	String RefPart = line.split("\",")[1].toLowerCase();
         	if(RefPart.equals("café")){
@@ -298,7 +327,7 @@ public class E2E extends DatasetParser {
             	
             	
             	else if(m5.find()){
-            		System.out.println(m5.group(0));
+            		
             		observedWordSequence.add(m5.group(1).trim());
             		observedWordSequence.add(m5.group(2).trim());
             		observedWordSequence.add(m5.group(3).trim());
@@ -409,10 +438,33 @@ public class E2E extends DatasetParser {
                                     distance = backwardDistance;
                                 }
                                 // We ignore all nGrams that are less similar than a threshold
-                                if (distance > 0.3) {
+                                if(valueToCompare.equals("5 out of 5")
+                                		||valueToCompare.equals("1 out of 5")
+                                		||valueToCompare.equals("3 out of 5")){
+                                	if(distance>0.1){
+                                	observedValueAlignments.get(valueToCompare).put(align, distance);
+                                	}
+                                }
+                                else if(valueToCompare.equals("familyfriendly_no")
+                                		|| valueToCompare.equals("familyfriendly_yes")){
+                                	if(distance>0.1){
+                                		observedValueAlignments.get(valueToCompare).put(align, distance);
+                                	}
+                                	
+                                }else if (valueToCompare.equals("more than £30")
+                                		||valueToCompare.equals("£20-25")
+                                		||valueToCompare.equals("less than £20")){
+                                	if(distance>0.1){
+                                		observedValueAlignments.get(valueToCompare).put(align, distance);
+                                	}
+                                }
+                                
+                                else{
+                                	if (distance > 0.65) {
                                     
-                                   observedValueAlignments.get(valueToCompare).put(align, distance);
+                                		observedValueAlignments.get(valueToCompare).put(align, distance);
                                     
+                                	}
                                 }
                             }
                         	
@@ -491,7 +543,7 @@ public class E2E extends DatasetParser {
             }
             getObservedAttrValueSequences().add(observedAttrValueSequence);
             
-         num++;   
+           
         }
         
         
@@ -524,7 +576,7 @@ public class E2E extends DatasetParser {
         FileOutputStream fout8 = null;
         ObjectOutputStream oos8 = null;
         try {
-            System.out.print("Write lists...");
+            System.out.println("Write lists...");
             fout1 = new FileOutputStream(file1);
             oos1 = new ObjectOutputStream(fout1);
             oos1.writeObject(getPredicates());
@@ -614,7 +666,7 @@ public class E2E extends DatasetParser {
                 && (new File(file7)).exists()
                 && (new File(file8)).exists()) {
             try {
-                System.out.print("Load lists...");
+                System.out.println("Load lists...");
                 fin1 = new FileInputStream(file1);
                 ois1 = new ObjectInputStream(fin1);
                 Object o1 = ois1.readObject();
@@ -734,10 +786,48 @@ public class E2E extends DatasetParser {
 	@Override
 	public void createTrainingData() {
 		
-		
+		int N = 200;
 		System.out.println("create naive alignments");
 		createNaiveAlignments(getTrainingData());
 		System.out.println("done");
+		ArrayList<String> topNWords = new ArrayList<>();
+		// build word dictionary
+		HashMap<String,Integer> wordDictionary = new HashMap<>();
+		getTrainingData().forEach((di)->{
+			di.getDirectReferenceSequence().forEach((action)->{
+				if(!wordDictionary.containsKey(action.getWord())){
+					wordDictionary.put(action.getWord(), 1);
+				}
+				wordDictionary.put(action.getWord(), wordDictionary.get(action.getWord())+1);
+			});
+			
+		});
+		/*
+		ValueComparator bvc = new ValueComparator(wordDictionary);
+		
+        TreeMap<String, Integer> sorted_map = new TreeMap<String, Integer>(bvc);
+        sorted_map.putAll(wordDictionary);
+        for(String word: sorted_map.keySet()){
+        	if(topNWords.size()<N){
+        		topNWords.add(word);
+        	}
+        	else{
+        		break;
+        	}
+        }
+        
+        getTrainingData().forEach((di)->{
+        	for(Action a : di.getDirectReferenceSequence()){
+        		if(!topNWords.contains(a.getWord())){
+        			a.setWord("@unk@");
+        		}
+        	}
+        	
+        });*/
+        
+        
+		
+		
 		
 		
 		//  create language model for word sequence and content sequence
@@ -783,6 +873,7 @@ public class E2E extends DatasetParser {
         HashMap<String, HashMap<String, HashSet<Action>>> availableWordActions = new HashMap<>();
         availableContentActions.put(singlePredicate, new HashSet<>());
     	availableWordActions.put(singlePredicate, new HashMap<>());
+    	
         getTrainingData().stream().forEach((di)->{
         	
         	for(String attr: di.getMeaningRepresentation().getAttributeValues().keySet()){
@@ -811,12 +902,79 @@ public class E2E extends DatasetParser {
         	availableWordActions.get(singlePredicate).get(Action.TOKEN_END).add(new Action(Action.TOKEN_END,Action.TOKEN_END));
         	
         });
+    	/*
+    	getTrainingData().stream().forEach((di)->{
+        	
+        	for(String attr: di.getMeaningRepresentation().getAttributeValues().keySet()){
+        		availableContentActions.get(singlePredicate).add(attr.toLowerCase());
+        		if(!availableWordActions.get(singlePredicate).containsKey(attr.toLowerCase())){
+        			availableWordActions.get(singlePredicate).put(attr.toLowerCase(), new HashSet<>());
+        		}
+        		
+        		for(int e =0; e< di.getDirectReferenceSequence().size();e++){
+        			Action action = di.getDirectReferenceSequence().get(e);
+        			if(!action.getAttribute().equals(Action.TOKEN_PUNCT)&&
+        					!action.getWord().equals(Action.TOKEN_START)){
+        				if(action.getAttribute().contains(attr)){
+        					availableWordActions.get(singlePredicate).get(attr).add(new Action(action.getWord(), attr));
+        				}
+        				// range 3 consider 
+        				
+        				
+        				
+        				if(e-1>0&& !di.getDirectReferenceSequence().get(e-1).getAttribute().contains(attr)
+        						&&!di.getDirectReferenceSequence().get(e-1).getAttribute().equals(Action.TOKEN_PUNCT)
+        						&&!di.getDirectReferenceSequence().get(e-1).getWord().equals(Action.TOKEN_START)){
+        					availableWordActions.get(singlePredicate).get(attr).add(new Action(di.getDirectReferenceSequence().get(e-1).getWord(), attr));
+        				}
+        				if(e+1<di.getDirectReferenceSequence().size()&&! di.getDirectReferenceSequence().get(e+1).getAttribute().contains(attr)
+        						&&!di.getDirectReferenceSequence().get(e+1).getAttribute().equals(Action.TOKEN_PUNCT)
+        						&&!di.getDirectReferenceSequence().get(e+1).getWord().equals(Action.TOKEN_START)){
+        					availableWordActions.get(singlePredicate).get(attr).add(new Action(di.getDirectReferenceSequence().get(e+1).getWord(), attr));
+        				}
+        				if(e+2<di.getDirectReferenceSequence().size()&& !di.getDirectReferenceSequence().get(e+2).getAttribute().contains(attr)
+        						&&!di.getDirectReferenceSequence().get(e+2).getAttribute().equals(Action.TOKEN_PUNCT)
+        						&&!di.getDirectReferenceSequence().get(e+2).getWord().equals(Action.TOKEN_START)){
+        					availableWordActions.get(singlePredicate).get(attr).add(new Action(di.getDirectReferenceSequence().get(e+2).getWord(), attr));
+        				}
+        				if(e-2>0&&! di.getDirectReferenceSequence().get(e-2).getAttribute().contains(attr)
+        						&&!di.getDirectReferenceSequence().get(e-2).getAttribute().equals(Action.TOKEN_PUNCT)
+        						&&!di.getDirectReferenceSequence().get(e-2).getWord().equals(Action.TOKEN_START)){
+        					availableWordActions.get(singlePredicate).get(attr).add(new Action(di.getDirectReferenceSequence().get(e-2).getWord(), attr));
+        				}
+        				if(e+3<di.getDirectReferenceSequence().size()&& !di.getDirectReferenceSequence().get(e+3).getAttribute().contains(attr)
+        						&&!di.getDirectReferenceSequence().get(e+3).getAttribute().equals(Action.TOKEN_PUNCT)
+        						&&!di.getDirectReferenceSequence().get(e+3).getWord().equals(Action.TOKEN_START)){
+        					availableWordActions.get(singlePredicate).get(attr).add(new Action(di.getDirectReferenceSequence().get(e+3).getWord(), attr));
+        				}
+        				if(e-3>0&&! di.getDirectReferenceSequence().get(e-3).getAttribute().contains(attr)
+        						&&!di.getDirectReferenceSequence().get(e-3).getAttribute().equals(Action.TOKEN_PUNCT)
+        						&&!di.getDirectReferenceSequence().get(e-3).getWord().equals(Action.TOKEN_START)){
+        					availableWordActions.get(singlePredicate).get(attr).add(new Action(di.getDirectReferenceSequence().get(e-3).getWord(), attr));
+        				}
+        				
+        			}
+        		}
+        		
+        		
+        		
+        	}
+        	availableContentActions.get(singlePredicate).add(Action.TOKEN_END);
+        	availableWordActions.get(singlePredicate).put(Action.TOKEN_END,new HashSet<>());
+        	availableWordActions.get(singlePredicate).get(Action.TOKEN_END).add(new Action(Action.TOKEN_END,Action.TOKEN_END));
+        	
+        });*/
         setAvailableContentActions(availableContentActions);
         setAvailableWordActions(availableWordActions);
         
+        //getAvailableWordActions().get(singlePredicate).keySet().forEach((attr)->{
+        	//System.out.println(attr+" "+getAvailableWordActions().get(singlePredicate).get(attr).size());
+        	
+        //});
+        
         // create training instances
         
-        if(isResetStoredCaches()||!loadTrainingData(getTrainingData().size())){
+        //if(isResetStoredCaches()||!loadTrainingData(getTrainingData().size())){
         	System.out.print("Create training data...");
         	Object[] results = inferFeatureAndCostVectors();
         	System.out.print("almost...");
@@ -856,20 +1014,10 @@ public class E2E extends DatasetParser {
                 });
             });
             writeTrainingData(getTrainingData().size());
-        }
-        getTrainingData().forEach((di)->{
-        	for(Action a: di.getDirectReferenceSequence()){
-        		System.out.print(a.getAttribute()+"###"+a.getWord()+"  ");
-        	}
-        	System.out.println("");
-        	//System.out.println(di.getMeaningRepresentation().getAbstractMR());
-        	
-        });	
-        for(String attr: getValueAlignments().keySet()){
-        	for(ArrayList<String> check :getValueAlignments().get(attr).keySet()){
-        		//System.out.println(attr+"  "+check+ "  "+ getValueAlignments().get(attr).get(check));
-        	}
-        }
+        //}
+        
+        
+        
         
 	}
 	
@@ -1365,9 +1513,8 @@ public class E2E extends DatasetParser {
             predictedAttrValues.forEach((attributeValuePair) -> {
                 predictedAttrs.add(attributeValuePair.split("=")[0]);
             });
-            //for(Action act : predictedActionList ){
-            	//System.out.print(act.getAttribute()+"###"+act.getWord()+"  ");
-            //}
+            
+            //System.out.println("");
             String predictedWordSequence = postProcessWordSequence(di, predictedActionList);
            
             System.out.println(predictedWordSequence);
@@ -1421,7 +1568,7 @@ public class E2E extends DatasetParser {
             finalReferences.add(references);
         }
 
-        @SuppressWarnings("unchecked")
+        @SuppressWarnings({ "unchecked", "rawtypes" })
 		BLEUMetric BLEU = new BLEUMetric(finalReferences, 4, false);
         @SuppressWarnings("unchecked")
 		Double bleuScore = BLEU.score(generations);
@@ -2417,15 +2564,22 @@ public class E2E extends DatasetParser {
 			HashSet<String> attrValuesThatFollow, boolean wasValueMentioned,
 			HashMap<String, HashSet<Action>> availableWordActions) {
 		TObjectDoubleHashMap<String> costs = new TObjectDoubleHashMap<>();
+		
+		String attr = bestAction.getAttribute();
+        if (bestAction.getAttribute().contains("=")) {
+            attr = bestAction.getAttribute().substring(0, bestAction.getAttribute().indexOf('='));
+        }
+        if(!availableWordActions.containsKey(attr)){
+        	System.out.println(attr);
+        	System.out.println("doesn't contain attr "+attr);
+        	System.exit(0);
+        }
+		
+		
+        
         if (!bestAction.getWord().trim().isEmpty()) {
             //COSTS
-            String attr = bestAction.getAttribute();
-            if (bestAction.getAttribute().contains("=")) {
-                attr = bestAction.getAttribute().substring(0, bestAction.getAttribute().indexOf('='));
-            }
-            if(!availableWordActions.containsKey(attr)){
-            	System.out.println(attr);
-            }
+            
             for (Action action : availableWordActions.get(attr)) {
                 if (action.getWord().equalsIgnoreCase(bestAction.getWord().trim())) {
                     costs.put(action.getAction(), 0.0);
@@ -2459,10 +2613,7 @@ public class E2E extends DatasetParser {
             currentValue = currentAttrValue.substring(currentAttrValue.indexOf('=') + 1);
         }
         TObjectDoubleHashMap<String> generalFeatures = new TObjectDoubleHashMap<>();
-        HashMap<String, TObjectDoubleHashMap<String>> valueSpecificFeatures = new HashMap<>();
-        for (Action action : availableWordActions.get(currentAttr)) {
-            valueSpecificFeatures.put(action.getAction(), new TObjectDoubleHashMap<String>());
-        }
+        
         ArrayList<Action> generatedWords = new ArrayList<>();
         ArrayList<Action> generatedWordsInSameAttrValue = new ArrayList<>();
         ArrayList<String> generatedPhrase = new ArrayList<>();
@@ -2497,6 +2648,7 @@ public class E2E extends DatasetParser {
         if (generatedWords.size() - 3 >= 0) {
             prev3Word = generatedWords.get(generatedWords.size() - 3).getWord().trim();
         }
+        /*
         String prev4Word = "@@";
         if (generatedWords.size() - 4 >= 0) {
             prev4Word = generatedWords.get(generatedWords.size() - 4).getWord().trim();
@@ -2504,17 +2656,17 @@ public class E2E extends DatasetParser {
         String prev5Word = "@@";
         if (generatedWords.size() - 5 >= 0) {
             prev5Word = generatedWords.get(generatedWords.size() - 5).getWord().trim();
-        }
+        }*/
 
         String prevBigram = prev2Word + "|" + prevWord;
         String prevTrigram = prev3Word + "|" + prev2Word + "|" + prevWord;
-        String prev4gram = prev4Word + "|" + prev3Word + "|" + prev2Word + "|" + prevWord;
-        String prev5gram = prev5Word + "|" + prev4Word + "|" + prev3Word + "|" + prev2Word + "|" + prevWord;
+        //String prev4gram = prev4Word + "|" + prev3Word + "|" + prev2Word + "|" + prevWord;
+        //String prev5gram = prev5Word + "|" + prev4Word + "|" + prev3Word + "|" + prev2Word + "|" + prevWord;
 
         generalFeatures.put("feature_word_bigram_" + prevBigram.toLowerCase(), 1.0);
         generalFeatures.put("feature_word_trigram_" + prevTrigram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_word_4gram_" + prev4gram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_word_5gram_" + prev5gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_word_4gram_" + prev4gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_word_5gram_" + prev5gram.toLowerCase(), 1.0);
         
       //Previous Attr|Word features
         for (int j = 1; j <= 1; j++) {
@@ -2552,7 +2704,7 @@ public class E2E extends DatasetParser {
             } else {
                 prev3AttrWord = generatedWords.get(generatedWords.size() - 3).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 3).getWord().trim();
             }
-        }
+        }/*
         String prev4AttrWord = "@@";
         if (generatedWords.size() - 4 >= 0) {
             if (generatedWords.get(generatedWords.size() - 4).getAttribute().contains("=")) {
@@ -2568,17 +2720,17 @@ public class E2E extends DatasetParser {
             } else {
                 prev5AttrWord = generatedWords.get(generatedWords.size() - 5).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 5).getWord().trim();
             }
-        }
+        }*/
 
         String prevAttrWordBigram = prev2AttrWord + "|" + prevAttrWord;
         String prevAttrWordTrigram = prev3AttrWord + "|" + prev2AttrWord + "|" + prevAttrWord;
-        String prevAttrWord4gram = prev4AttrWord + "|" + prev3AttrWord + "|" + prev2AttrWord + "|" + prevAttrWord;
-        String prevAttrWord5gram = prev5AttrWord + "|" + prev4AttrWord + "|" + prev3AttrWord + "|" + prev2AttrWord + "|" + prevAttrWord;
+        //String prevAttrWord4gram = prev4AttrWord + "|" + prev3AttrWord + "|" + prev2AttrWord + "|" + prevAttrWord;
+        //String prevAttrWord5gram = prev5AttrWord + "|" + prev4AttrWord + "|" + prev3AttrWord + "|" + prev2AttrWord + "|" + prevAttrWord;
 
         generalFeatures.put("feature_attrWord_bigram_" + prevAttrWordBigram.toLowerCase(), 1.0);
         generalFeatures.put("feature_attrWord_trigram_" + prevAttrWordTrigram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_attrWord_4gram_" + prevAttrWord4gram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_attrWord_5gram_" + prevAttrWord5gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_attrWord_4gram_" + prevAttrWord4gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_attrWord_5gram_" + prevAttrWord5gram.toLowerCase(), 1.0);
         
       //Previous AttrValue|Word features
         for (int j = 1; j <= 1; j++) {
@@ -2599,7 +2751,7 @@ public class E2E extends DatasetParser {
         String prev3AttrValueWord = "@@";
         if (generatedWords.size() - 3 >= 0) {
             prev3AttrValueWord = generatedWords.get(generatedWords.size() - 3).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 3).getWord().trim();
-        }
+        }/*
         String prev4AttrValueWord = "@@";
         if (generatedWords.size() - 4 >= 0) {
             prev4AttrValueWord = generatedWords.get(generatedWords.size() - 4).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 4).getWord().trim();
@@ -2607,17 +2759,17 @@ public class E2E extends DatasetParser {
         String prev5AttrValueWord = "@@";
         if (generatedWords.size() - 5 >= 0) {
             prev5AttrValueWord = generatedWords.get(generatedWords.size() - 5).getAttribute().trim() + ":" + generatedWords.get(generatedWords.size() - 5).getWord().trim();
-        }
+        }*/
 
         String prevAttrValueWordBigram = prev2AttrValueWord + "|" + prevAttrValueWord;
         String prevAttrValueWordTrigram = prev3AttrValueWord + "|" + prev2AttrValueWord + "|" + prevAttrValueWord;
-        String prevAttrValueWord4gram = prev4AttrValueWord + "|" + prev3AttrValueWord + "|" + prev2AttrValueWord + "|" + prevAttrValueWord;
-        String prevAttrValueWord5gram = prev5AttrValueWord + "|" + prev4AttrValueWord + "|" + prev3AttrValueWord + "|" + prev2AttrValueWord + "|" + prevAttrValueWord;
+        //String prevAttrValueWord4gram = prev4AttrValueWord + "|" + prev3AttrValueWord + "|" + prev2AttrValueWord + "|" + prevAttrValueWord;
+        //String prevAttrValueWord5gram = prev5AttrValueWord + "|" + prev4AttrValueWord + "|" + prev3AttrValueWord + "|" + prev2AttrValueWord + "|" + prevAttrValueWord;
 
         generalFeatures.put("feature_attrValueWord_bigram_" + prevAttrValueWordBigram.toLowerCase(), 1.0);
         generalFeatures.put("feature_attrValueWord_trigram_" + prevAttrValueWordTrigram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_attrValueWord_4gram_" + prevAttrValueWord4gram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_attrValueWord_5gram_" + prevAttrValueWord5gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_attrValueWord_4gram_" + prevAttrValueWord4gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_attrValueWord_5gram_" + prevAttrValueWord5gram.toLowerCase(), 1.0);
 
       //Previous attrValue features
         int attributeSize = generatedAttributes.size();
@@ -2639,7 +2791,7 @@ public class E2E extends DatasetParser {
         String prev3AttrValue = "@@";
         if (attributeSize - 3 >= 0) {
             prev3AttrValue = generatedAttributes.get(attributeSize - 3).trim();
-        }
+        }/*
         String prev4AttrValue = "@@";
         if (attributeSize - 4 >= 0) {
             prev4AttrValue = generatedAttributes.get(attributeSize - 4).trim();
@@ -2647,17 +2799,17 @@ public class E2E extends DatasetParser {
         String prev5AttrValue = "@@";
         if (attributeSize - 5 >= 0) {
             prev5AttrValue = generatedAttributes.get(attributeSize - 5).trim();
-        }
+        }*/
 
         String prevAttrBigramValue = prev2AttrValue + "|" + prevAttrValue;
         String prevAttrTrigramValue = prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
-        String prevAttr4gramValue = prev4AttrValue + "|" + prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
-        String prevAttr5gramValue = prev5AttrValue + "|" + prev4AttrValue + "|" + prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
+        //String prevAttr4gramValue = prev4AttrValue + "|" + prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
+        //String prevAttr5gramValue = prev5AttrValue + "|" + prev4AttrValue + "|" + prev3AttrValue + "|" + prev2AttrValue + "|" + prevAttrValue;
 
         generalFeatures.put("feature_attrValue_bigram_" + prevAttrBigramValue.toLowerCase(), 1.0);
         generalFeatures.put("feature_attrValue_trigram_" + prevAttrTrigramValue.toLowerCase(), 1.0);
-        generalFeatures.put("feature_attrValue_4gram_" + prevAttr4gramValue.toLowerCase(), 1.0);
-        generalFeatures.put("feature_attrValue_5gram_" + prevAttr5gramValue.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_attrValue_4gram_" + prevAttr4gramValue.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_attrValue_5gram_" + prevAttr5gramValue.toLowerCase(), 1.0);
 
       //Previous attr features
         for (int j = 1; j <= 1; j++) {
@@ -2694,7 +2846,7 @@ public class E2E extends DatasetParser {
             } else {
                 prev3Attr = generatedAttributes.get(attributeSize - 3).trim();
             }
-        }
+        }/*
         String prev4Attr = "@@";
         if (attributeSize - 4 >= 0) {
             if (generatedAttributes.get(attributeSize - 4).contains("=")) {
@@ -2710,17 +2862,17 @@ public class E2E extends DatasetParser {
             } else {
                 prev5Attr = generatedAttributes.get(attributeSize - 5).trim();
             }
-        }
+        }*/
 
         String prevAttrBigram = prev2Attr + "|" + prevAttr;
         String prevAttrTrigram = prev3Attr + "|" + prev2Attr + "|" + prevAttr;
-        String prevAttr4gram = prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
-        String prevAttr5gram = prev5Attr + "|" + prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        //String prevAttr4gram = prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
+        //String prevAttr5gram = prev5Attr + "|" + prev4Attr + "|" + prev3Attr + "|" + prev2Attr + "|" + prevAttr;
 
         generalFeatures.put("feature_attr_bigram_" + prevAttrBigram.toLowerCase(), 1.0);
         generalFeatures.put("feature_attr_trigram_" + prevAttrTrigram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_attr_4gram_" + prevAttr4gram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_attr_5gram_" + prevAttr5gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_attr_4gram_" + prevAttr4gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_attr_5gram_" + prevAttr5gram.toLowerCase(), 1.0);
         
       //Next attr features
         for (int j = 0; j < 1; j++) {
@@ -2757,7 +2909,7 @@ public class E2E extends DatasetParser {
             } else {
                 next3Attr = nextGeneratedAttributes.get(2).trim();
             }
-        }
+        }/*
         String next4Attr = "@@";
         if (3 < nextGeneratedAttributes.size()) {
             if (nextGeneratedAttributes.get(3).contains("=")) {
@@ -2773,17 +2925,17 @@ public class E2E extends DatasetParser {
             } else {
                 next5Attr = nextGeneratedAttributes.get(4).trim();
             }
-        }
+        }*/
 
         String nextAttrBigram = nextAttr + "|" + next2Attr;
         String nextAttrTrigram = nextAttr + "|" + next2Attr + "|" + next3Attr;
-        String nextAttr4gram = nextAttr + "|" + next2Attr + "|" + next3Attr + "|" + next4Attr;
-        String nextAttr5gram = nextAttr + "|" + next2Attr + "|" + next3Attr + "|" + next4Attr + "|" + next5Attr;
+        //String nextAttr4gram = nextAttr + "|" + next2Attr + "|" + next3Attr + "|" + next4Attr;
+        //String nextAttr5gram = nextAttr + "|" + next2Attr + "|" + next3Attr + "|" + next4Attr + "|" + next5Attr;
 
         generalFeatures.put("feature_nextAttr_bigram_" + nextAttrBigram.toLowerCase(), 1.0);
         generalFeatures.put("feature_nextAttr_trigram_" + nextAttrTrigram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_nextAttr_4gram_" + nextAttr4gram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_nextAttr_5gram_" + nextAttr5gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_nextAttr_4gram_" + nextAttr4gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_nextAttr_5gram_" + nextAttr5gram.toLowerCase(), 1.0);
 
       //Next attrValue features
         for (int j = 0; j < 1; j++) {
@@ -2804,7 +2956,7 @@ public class E2E extends DatasetParser {
         String next3AttrValue = "@@";
         if (2 < nextGeneratedAttributes.size()) {
             next3AttrValue = nextGeneratedAttributes.get(2).trim();
-        }
+        }/*
         String next4AttrValue = "@@";
         if (3 < nextGeneratedAttributes.size()) {
             next4AttrValue = nextGeneratedAttributes.get(3).trim();
@@ -2812,17 +2964,17 @@ public class E2E extends DatasetParser {
         String next5AttrValue = "@@";
         if (4 < nextGeneratedAttributes.size()) {
             next5AttrValue = nextGeneratedAttributes.get(4).trim();
-        }
+        }*/
 
         String nextAttrValueBigram = nextAttrValue + "|" + next2AttrValue;
         String nextAttrValueTrigram = nextAttrValue + "|" + next2AttrValue + "|" + next3AttrValue;
-        String nextAttrValue4gram = nextAttrValue + "|" + next2AttrValue + "|" + next3AttrValue + "|" + next4AttrValue;
-        String nextAttrValue5gram = nextAttrValue + "|" + next2AttrValue + "|" + next3AttrValue + "|" + next4AttrValue + "|" + next5AttrValue;
+        //String nextAttrValue4gram = nextAttrValue + "|" + next2AttrValue + "|" + next3AttrValue + "|" + next4AttrValue;
+        //String nextAttrValue5gram = nextAttrValue + "|" + next2AttrValue + "|" + next3AttrValue + "|" + next4AttrValue + "|" + next5AttrValue;
 
         generalFeatures.put("feature_nextAttrValue_bigram_" + nextAttrValueBigram.toLowerCase(), 1.0);
         generalFeatures.put("feature_nextAttrValue_trigram_" + nextAttrValueTrigram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_nextAttrValue_4gram_" + nextAttrValue4gram.toLowerCase(), 1.0);
-        generalFeatures.put("feature_nextAttrValue_5gram_" + nextAttrValue5gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_nextAttrValue_4gram_" + nextAttrValue4gram.toLowerCase(), 1.0);
+        //generalFeatures.put("feature_nextAttrValue_5gram_" + nextAttrValue5gram.toLowerCase(), 1.0);
 
       //If values have already been generated or not
         generalFeatures.put("feature_valueToBeMentioned_" + currentValue.toLowerCase(), 1.0);
@@ -2873,7 +3025,13 @@ public class E2E extends DatasetParser {
             }
         });
       //Word specific features (and also global features)
+        
+        HashMap<String, TObjectDoubleHashMap<String>> valueSpecificFeatures = new HashMap<>();
         for (Action action : availableWordActions.get(currentAttr)) {
+            valueSpecificFeatures.put(action.getAction(), new TObjectDoubleHashMap<String>());
+        }
+        for (Action action : availableWordActions.get(currentAttr)) {
+        	
             //Is word same as previous word
             if (prevWord.equals(action.getWord())) {
                 //valueSpecificFeatures.get(action.getAction()).put("feature_specific_sameAsPreviousWord", 1.0);
@@ -2890,7 +3048,7 @@ public class E2E extends DatasetParser {
                     valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_appearedInSameAttrValue", 1.0);
                 } else {
                     //valueSpecificFeatures.get(action.getAction()).put("feature_specific_notAppearedInSameAttrValue", 1.0);
-                    //valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_notAppearedInSameAttrValue", 1.0);
+                    valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_notAppearedInSameAttrValue", 1.0);
                 }
             });
             //Has word appeared before
@@ -2974,16 +3132,7 @@ public class E2E extends DatasetParser {
 
                                         }
                                     } else {
-                                        /*if (mentionedValues.contains(value)) {
-                                        valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue_alreadyMentioned", 1.0);
-                                        } else if (currentValue.equals(value)) {
-                                        valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue_current", 1.0);
-                                        } else if (valuesThatFollow.contains(value)) {
-                                        valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue_thatFollows", 1.0);
-                                        } else {
-                                        valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue_notInMR", 1.0);
-                                        }*/
-                                        //valueSpecificFeatures.get(action.getAction()).put("feature_specific_outOfValue", 1.0);
+                                        
                                         valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_outOfValue", 1.0);
                                     }
                                 }
@@ -3049,37 +3198,7 @@ public class E2E extends DatasetParser {
                     valueSpecificFeatures.get(action.getAction()).put("global_feature_specific_XValue_notInMR", 1.0);
                 }
             }
-            /*for (int i : nGrams.keySet()) {
-            for (String nGram : nGrams.get(i)) {
-            if (i == 2) {
-            if (nGram.startsWith(prevWord + "|")
-            && nGram.endsWith("|" + action.getAction())) {
-            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPreviousWord", 1.0);
-            }
-            } else if (i == 3) {
-            if (nGram.startsWith(prevBigram + "|")
-            && nGram.endsWith("|" + action.getAction())) {
-            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPreviousBigram", 1.0);
-            }
-            } else if (i == 4) {
-            if (nGram.startsWith(prevTrigram + "|")
-            && nGram.endsWith("|" + action.getAction())) {
-            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPreviousTrigram", 1.0);
-            }
-            } else if (i == 5) {
-            if (nGram.startsWith(prev4gram + "|")
-            && nGram.endsWith("|" + action.getAction())) {
-            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPrevious4gram", 1.0);
-            }
-            } else if (i == 6) {
-            if (nGram.startsWith(prev5gram + "|")
-            && nGram.endsWith("|" + action.getAction())) {
-            valueSpecificFeatures.get(action.getAction()).put("feature_specific_valuesFollowsPrevious5gram", 1.0);
-            }
-            }
-            }
-            }*/
-
+            
             //valueSpecificFeatures.get(action.getAction()).put("global_feature_abstractMR_" + mr.getAbstractMR(), 1.0);
             valueSpecificFeatures.get(action.getAction()).put("global_feature_currentValue_" + currentValue.toLowerCase(), 1.0);
 
@@ -3087,7 +3206,7 @@ public class E2E extends DatasetParser {
             for (int i = 0; i < generatedWords.size(); i++) {
                 fullGramLM.add(generatedWords.get(i).getWord());
             }
-
+            
             ArrayList<String> prev5wordGramLM = new ArrayList<>();
             int j = 0;
             for (int i = generatedWords.size() - 1; (i >= 0 && j < 5); i--) {
@@ -3101,7 +3220,7 @@ public class E2E extends DatasetParser {
 
             double afterLMScorePerPred5Gram = getWordLMsPerPredicate().get(predicate).getProbability(prev5wordGramLM);
             valueSpecificFeatures.get(action.getAction()).put("global_feature_LMWord_perPredicate_5gram_score", afterLMScorePerPred5Gram);
-
+			
             double afterLMScorePerPred = getWordLMsPerPredicate().get(predicate).getProbability(fullGramLM);
             valueSpecificFeatures.get(action.getAction()).put("global_feature_LMWord_perPredicate_score", afterLMScorePerPred);
         }
@@ -3202,6 +3321,7 @@ public class E2E extends DatasetParser {
                 previousIsTokenX = false;
             }
         }
+        
 
         predictedWordSequence = predictedWordSequence.trim();
         if (di.getMeaningRepresentation().getPredicate().startsWith("?")
@@ -3563,4 +3683,3 @@ class InferE2EVectorsThread extends Thread {
     	
     }
 }
-
