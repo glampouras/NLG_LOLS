@@ -20,7 +20,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Random;
-import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,8 +38,6 @@ import jarow.Instance;
 import jarow.JAROW;
 import jarow.Prediction;
 import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import similarity_measures.Levenshtein;
 import similarity_measures.Rouge;
 import simpleLM.SimpleLM;
@@ -108,10 +105,21 @@ public class E2E extends DatasetParser {
             );
             getDatasetInstances().put(singlePredicate, new ArrayList<>());
             createLists(devDataFile);
-            Collections.shuffle(getDatasetInstances().get(singlePredicate), new Random(123));
+            //Collections.shuffle(getDatasetInstances().get(singlePredicate), new Random(123));
             getValidationData().addAll(getDatasetInstances().get(singlePredicate)
             //.subList(0, 100)
             );
+            
+            // Create the refs for DEV data, as described in https://github.com/tuetschek/e2e-metrics/tree/master/example-inputs
+            for (DatasetInstance di : getValidationData()) {
+                HashSet<String> refs = new HashSet<>();
+                for (DatasetInstance di2 : getValidationData()) {
+                    if (di2.getMeaningRepresentation().getMRstr().equals(di.getMeaningRepresentation().getMRstr())) {
+                        refs.add(di2.getDirectReference());
+                    }
+                }
+                di.setEvaluationReferences(refs);
+            }
 
             getDatasetInstances().get(singlePredicate).addAll(getTrainingData());
             writeLists();
@@ -2115,13 +2123,18 @@ public class E2E extends DatasetParser {
 
         BufferedWriter bw = null;
         File f = null;
+
+        BufferedWriter bw2 = null;
+        File f2 = null;
         try {
             f = new File("results/E2E" + "TextsAfter" + (epoch) + "_" + JLOLS.sentenceCorrectionFurtherSteps + "_" + JLOLS.p + "epochsTESTINGDATA.txt");
+            f2 = new File("results/E2E" + "distinctTextsAfter" + (epoch) + "_" + JLOLS.sentenceCorrectionFurtherSteps + "_" + JLOLS.p + "epochsTESTINGDATA.txt");
         } catch (NullPointerException e) {
         }
 
         try {
             bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(f)));
+            bw2 = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(f2)));
         } catch (FileNotFoundException e) {
         }
 
@@ -2131,17 +2144,51 @@ public class E2E extends DatasetParser {
         } catch (IOException e) {
         }
 
-        for (DatasetInstance di : testingData) {
-            String predictedWordSequence = predictedWordSequences_overAllPredicates.get(di).replaceAll("\\?", " \\? ").replaceAll(":", " : ").replaceAll("\\.", " \\. ").replaceAll(",", " , ").replaceAll("  ", " ").trim();
+        //Unique according to the MR as it appears on the dataset (for evaluation consistency)
+        ArrayList<DatasetInstance> uniqueDi = new ArrayList<>();
+        //Distinct according to the abstract MR
+        ArrayList<DatasetInstance> distinctDi = new ArrayList<>();
+        HashMap<String, String> exportMap = new HashMap<>();        
+        for (DatasetInstance di : testingData) {       
+            boolean distinct = true;
+            for (DatasetInstance tr : getTrainingData()) {
+                if (tr.getMeaningRepresentation().getAbstractMR().equals(di.getMeaningRepresentation().getAbstractMR())) {
+                    distinct = false;
+                }
+            }
+            String ex = predictedWordSequences_overAllPredicates.get(di).replaceAll("\\?", " \\? ").replaceAll(":", " : ").replaceAll("\\.", " \\. ").replaceAll(",", " , ").replaceAll("  ", " ").trim();
+            if (!exportMap.containsKey(di.getMeaningRepresentation().getMRstr())) {
+                uniqueDi.add(di);
+                if (distinct) {
+                    distinctDi.add(di);
+                }
+                exportMap.put(di.getMeaningRepresentation().getMRstr(), ex);
+            } else {
+                double BLEUSmoothCurrent = BLEUMetric.computeLocalSmoothScore(exportMap.get(di.getMeaningRepresentation().getMRstr()), finalReferencesWordSequences.get(di), 4);
+                double BLEUSmoothNew = BLEUMetric.computeLocalSmoothScore(ex, finalReferencesWordSequences.get(di), 4);
+                if (BLEUSmoothNew > BLEUSmoothCurrent) {
+                    exportMap.put(di.getMeaningRepresentation().getMRstr(), ex);
+                }
+            }
+        } 
+        for (DatasetInstance di : uniqueDi) {
             try {
-                bw.write(predictedWordSequence);
+                bw.write(exportMap.get(di.getMeaningRepresentation().getMRstr()));
                 bw.write("\n");
+            } catch (IOException e) {
+            }
+        }
+        for (DatasetInstance di : distinctDi) {
+            try {
+                bw2.write(exportMap.get(di.getMeaningRepresentation().getMRstr()));
+                bw2.write("\n");
             } catch (IOException e) {
             }
         }
 
         try {
             bw.close();
+            bw2.close();
         } catch (IOException e) {
         }
         return bleuScore;
